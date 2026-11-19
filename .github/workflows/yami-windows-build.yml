@@ -1,0 +1,33 @@
+name: Yami Windows build
+
+on:
+  push:
+    branches:
+      - yami-purple-ui-source-review
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: rust
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+      - name: Rust source check
+        run: cargo check --all-targets
+      - name: Build application
+        run: cargo build --release --bin Yami
+      - name: Build installer
+        run: cargo build --release --features installer --bin Yami-Setup
+      - name: Upload Windows executables
+        uses: actions/upload-artifact@v4
+        with:
+          name: Yami-v1.0.6-windows-source-review
+          path: |
+            rust/target/release/Yami.exe
+            rust/target/release/Yami-Setup.exe
+          if-no-files-found: error

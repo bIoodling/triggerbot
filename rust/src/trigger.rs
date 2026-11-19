@@ -70,7 +70,7 @@ pub fn start(shared: Arc<Shared>) -> std::thread::JoinHandle<()> {
         while shared.running.load(Ordering::Acquire) {
             let (cfg, version, viewport) = {
                 let c = shared.control.lock().unwrap();
-                if !c.enabled || !c.held || c.suspended || !input::down(c.config.hold) {
+                if !c.enabled || c.suspended || !input::down(c.config.hold) || c.config.output == 0 {
                     phase = Phase::Idle;
                     clear = None;
                     frames = 0;
@@ -79,7 +79,7 @@ pub fn start(shared: Arc<Shared>) -> std::thread::JoinHandle<()> {
                         .store(if c.enabled { 0 } else { 2 }, Ordering::Release);
                     let _ = shared
                         .wake
-                        .wait_timeout(c, Duration::from_millis(100))
+                        .wait_timeout(c, Duration::from_millis(2))
                         .unwrap();
                     continue;
                 }
@@ -92,6 +92,7 @@ pub fn start(shared: Arc<Shared>) -> std::thread::JoinHandle<()> {
                 frames = 0;
             }
             let Some((point, monitor)) = crate::capture::point(&cfg, viewport) else {
+                shared.status.store(2, Ordering::Release);
                 clear = None;
                 frames = 0;
                 std::thread::sleep(Duration::from_millis(20));
@@ -104,6 +105,7 @@ pub fn start(shared: Arc<Shared>) -> std::thread::JoinHandle<()> {
             {
                 gpu = unsafe { crate::gpu::Detector::new(monitor).ok() };
                 if gpu.is_none() {
+                    shared.status.store(2, Ordering::Release);
                     std::thread::sleep(Duration::from_millis(100));
                     continue;
                 }
@@ -113,6 +115,7 @@ pub fn start(shared: Arc<Shared>) -> std::thread::JoinHandle<()> {
                 Ok(Some(v)) => v,
                 Ok(None) => continue,
                 Err(_) => {
+                    shared.status.store(2, Ordering::Release);
                     gpu = None;
                     clear = None;
                     frames = 0;
@@ -122,7 +125,6 @@ pub fn start(shared: Arc<Shared>) -> std::thread::JoinHandle<()> {
             let c = shared.control.lock().unwrap();
             if c.generation != version
                 || !c.enabled
-                || !c.held
                 || c.suspended
                 || !input::down(cfg.hold)
             {
