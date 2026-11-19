@@ -195,6 +195,24 @@ fn perform(payload: &[u8], job: &Job) -> Result<PathBuf, String> {
     for file in &files {
         let _ = fs::remove_file(file.with_extension("bak"));
     }
+    // A confirmed replacement is a clean reinstall. Config lives in Roaming
+    // AppData, NOT in the LocalAppData installation folder.
+    // Delete only known Yami-owned configuration directories, after the new
+    // binaries have been installed successfully.
+    if let Some(roaming) = std::env::var_os("APPDATA") {
+        let roaming = PathBuf::from(roaming);
+        for name in ["Yami", "YamiTB"] {
+            let settings_dir = roaming.join(name);
+            if let Ok(metadata) = fs::symlink_metadata(&settings_dir) {
+                use std::os::windows::fs::MetadataExt;
+                if metadata.file_attributes() & 0x400 != 0 {
+                    return Err(format!("Refusing to remove linked settings directory: {name}"));
+                }
+                fs::remove_dir_all(&settings_dir)
+                    .map_err(|e| format!("Could not reset {name} settings: {e}"))?;
+            }
+        }
+    }
     job.progress.store(100, Ordering::Release);
     Ok(dir.join("Yami.exe"))
 }
