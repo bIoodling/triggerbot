@@ -195,6 +195,23 @@ fn perform(payload: &[u8], job: &Job) -> Result<PathBuf, String> {
     for file in &files {
         let _ = fs::remove_file(file.with_extension("bak"));
     }
+    // Remove stale files from the application-owned LocalAppData directory.
+    // Never follow reparse points or remove the two newly installed binaries.
+    for entry in fs::read_dir(&dir).map_err(|e| e.to_string())? {
+        let entry = entry.map_err(|e| e.to_string())?;
+        let name = entry.file_name();
+        if name == "Yami.exe" || name == "Uninstall.exe" {
+            continue;
+        }
+        let path = entry.path();
+        let metadata = fs::symlink_metadata(&path).map_err(|e| e.to_string())?;
+        use std::os::windows::fs::MetadataExt;
+        if metadata.file_attributes() & 0x400 != 0 || metadata.is_file() {
+            fs::remove_file(&path).map_err(|e| e.to_string())?;
+        } else if metadata.is_dir() {
+            fs::remove_dir_all(&path).map_err(|e| e.to_string())?;
+        }
+    }
     // A confirmed replacement is a clean reinstall. Config lives in Roaming
     // AppData, NOT in the LocalAppData installation folder.
     // Delete only known Yami-owned configuration directories, after the new
