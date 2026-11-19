@@ -1,4 +1,4 @@
-param([ValidateSet('Release','Debug')][string]$Configuration='Release')
+param([ValidateSet('Release','Debug')][string]$Configuration='Release',[switch]$Test)
 $ErrorActionPreference='Stop'
 $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
 if (!(Test-Path -LiteralPath $vswhere)) { throw 'Install Visual Studio with Desktop development with C++.' }
@@ -10,3 +10,9 @@ $artifactDirectory = Join-Path $PSScriptRoot 'artifacts'
 New-Item -ItemType Directory -Path $artifactDirectory -Force | Out-Null
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot "Yami TB\x64\$Configuration\Yami.exe") -Destination (Join-Path $artifactDirectory 'Yami.exe') -Force
 Write-Output (Join-Path $artifactDirectory 'Yami.exe')
+if ($Test) {
+    & $msbuild (Join-Path $PSScriptRoot 'tests\Tests.vcxproj') /nologo /m /verbosity:minimal /p:Configuration=Release /p:Platform=x64
+    if ($LASTEXITCODE -ne 0) { throw 'Test harness build failed.' }
+    & (Join-Path $artifactDirectory 'YamiTests.exe') (Join-Path $artifactDirectory 'test-results')
+    if ($LASTEXITCODE -ne 0) { throw 'Automated checks failed. See artifacts\test-results.' }
+}

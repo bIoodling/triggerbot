@@ -1,0 +1,10 @@
+{
+"passed":22,"failed":0,"gpu_adapter":"NVIDIA GeForce RTX 4060","gpu_classifications":785,"positive_cases":521,"negative_cases":264,"synthetic_false_positives":0,"synthetic_false_negatives":0,"live_qualified_appearances":33,"live_received_events":33,"live_duplicate_count":0,
+"gpu_submit_cpu":{"samples":785,"median_ms":0.029000,"p95_ms":0.055800,"p99_ms":0.105100},
+"gpu_shader":{"samples":696,"median_ms":0.004096,"p95_ms":0.004096,"p99_ms":0.005120},
+"gpu_submit_to_cpu_available":{"samples":785,"median_ms":0.052300,"p95_ms":0.123400,"p99_ms":0.618700},
+"desktop_acquire_call":{"samples":70,"median_ms":0.057000,"p95_ms":0.086300,"p99_ms":0.574100},
+"sendinput_call":{"samples":70,"median_ms":0.753700,"p95_ms":1.494800,"p99_ms":3.288700},
+"detection_to_input_dispatch":{"samples":70,"median_ms":0.753900,"p95_ms":1.495100,"p99_ms":3.289000},
+"controlled_paint_to_receiver":{"samples":33,"median_ms":16.264400,"p95_ms":16.739300,"p99_ms":16.803700}
+}

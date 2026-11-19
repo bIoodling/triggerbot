@@ -140,7 +140,7 @@
     </Manifest>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <ClCompile Include="main.cpp" /><ClInclude Include="activation.inc" /><ClInclude Include="engine.inc" /><ClInclude Include="frontend.inc" /><ClInclude Include="settings.inc" /><ResourceCompile Include="Yami.rc" />
+    <ClCompile Include="main.cpp" /><ClInclude Include="activation.inc" /><ClInclude Include="engine.inc" /><ClInclude Include="frontend.inc" /><ClInclude Include="settings.inc" /><ClInclude Include="detection_core.h" /><ClInclude Include="engine_options.h" /><ClInclude Include="gpu_detector.h" /><None Include="ColorDetect.hlsl" /><ResourceCompile Include="Yami.rc" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

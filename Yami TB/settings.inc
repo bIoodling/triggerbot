@@ -90,6 +90,14 @@ void SaveSettings()
         << L"\r\n[Output]\r\nVK=" << g_outputVK.load()
         << L"\r\n[Detector]\r\nTargetRGB=" << HexColor(g_targetColor.load()).substr(1)
         << L"\r\n[Window]\r\nLaunchMinimized=" << int(g_launchMinimized) << L"\r\n";
+    const auto options=ReadDetectionOptions();
+    out.precision(12);
+    out << L"[Detection]\r\nCursorless=" << int(options.cursorless)
+        << L"\r\nCalibrated=" << int(options.calibrated)
+        << L"\r\nNormalizedX=" << options.normalizedX << L"\r\nNormalizedY=" << options.normalizedY
+        << L"\r\nTolerance=" << options.tolerance << L"\r\nCursorRadius=" << options.cursorRadius
+        << L"\r\nFixedRadius=" << options.fixedRadius << L"\r\nClearMs=" << options.clearMs
+        << L"\r\nClearFrames=" << options.clearFrames << L"\r\nMinimumIntervalMs=" << options.minimumIntervalMs << L"\r\n";
     std::wstring content = L"\xFEFF" + out.str();
     std::wstring temp = path + L".tmp";
     HANDLE file = CreateFileW(temp.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
@@ -112,9 +120,6 @@ void LoadSettings()
     g_activationVK = loadBind(L"Activation", L"PrimaryVK", true);
     g_holdActivationVK = loadBind(L"Activation", L"HoldVK", true);
     g_outputVK = loadBind(L"Output", L"VK", false);
-    const int output = g_outputVK.load();
-    if (output == VK_LBUTTON || output == VK_RBUTTON || output == VK_MBUTTON ||
-        output == VK_XBUTTON1 || output == VK_XBUTTON2) g_outputVK = 0;
     wchar_t hex[64]{};
     GetPrivateProfileStringW(L"Detector", L"TargetRGB", L"00FF00", hex, ARRAYSIZE(hex), path.c_str());
     uint32_t rgb = 0x00FF00;
@@ -122,7 +127,18 @@ void LoadSettings()
     g_targetColor = rgb;
     g_launchMinimized = GetPrivateProfileIntW(L"Window", L"LaunchMinimized", 0, path.c_str()) != 0;
     g_startWindows = StartupRegistered();
-    g_toggleState = false;
+    auto number=[&](const wchar_t* key,double fallback,double minimum,double maximum){
+        wchar_t value[64]{};GetPrivateProfileStringW(L"Detection",key,L"",value,ARRAYSIZE(value),path.c_str());
+        wchar_t* end=nullptr;double loaded=wcstod(value,&end);
+        return end!=value&&*end==0&&std::isfinite(loaded)&&loaded>=minimum&&loaded<=maximum?loaded:fallback;
+    };
+    {std::lock_guard lock(g_optionsMutex);
+        g_options.cursorless=number(L"Cursorless",0,0,1)!=0;g_options.calibrated=number(L"Calibrated",0,0,1)!=0;
+        g_options.normalizedX=number(L"NormalizedX",.5,0,1);g_options.normalizedY=number(L"NormalizedY",.5,0,1);
+        g_options.tolerance=unsigned(number(L"Tolerance",2,0,16));g_options.cursorRadius=unsigned(number(L"CursorRadius",50,1,128));g_options.fixedRadius=unsigned(number(L"FixedRadius",12,1,128));
+        g_options.clearMs=number(L"ClearMs",8,0,100);g_options.clearFrames=unsigned(number(L"ClearFrames",2,2,16));g_options.minimumIntervalMs=number(L"MinimumIntervalMs",0,0,1000);
+    }
+    g_toggleState = true;
     g_primaryKeyDown = false;
     g_holdKeyDown = false;
     g_activationActive = false;

@@ -1,18 +1,25 @@
 # Changelog
 
-- Renamed executable, window and Windows product metadata to Yami.
-- Replaced the original interface with a compact near-black and purple layout
-  based on the supplied reference, using rounded panels and native controls.
-- Added readable binding names, Not Set defaults, capture prompts, Escape to
-  clear, outside-click cancellation and release protection while rebinding.
-- Added a hue-ring colour picker, saturation/value square, validated HEX entry,
-  live swatch preview, Apply and a desktop eyedropper.
-- Added a Windows tray icon and custom Open / Enable / Settings / Exit menu,
-  minimise-to-tray, restoration, single-instance handling and Explorer recovery.
-- Added automatic atomic settings saves, corrected colour reload validation,
-  current-user Windows startup and optional launch to tray.
-- Added per-monitor DPI layout, bounded popup positioning and asynchronous exit.
-- Isolated the supplied detection and output bodies without algorithm changes.
-- Preserved keyboard simulation and disallowed the source's broken mouse-output
-  selections. Existing mouse outputs migrate to Not Set.
-- Release x64 compilation succeeded. Runtime testing was skipped by request.
+## 1.1 — Engine rework
+
+- Preserved the approved main window, theme, picker, keybindings and tray.
+- Added Cursorless TB, normalized Roblox client calibration and minimal settings.
+- Replaced full-frame CPU staging/scanning with a D3D11 ROI compute shader and
+  four-byte nonblocking result readback.
+- Added tolerance, per-mode radius, clear time/frame confirmation and independent
+  optional minimum output interval.
+- Added a serialized single-trigger state machine, mandatory physical Hold,
+  activation/configuration tokens and stale-completion rejection.
+- Added capture/device-loss recovery, monitor selection and rotation transforms.
+- Corrected mouse output pairing and filtered self-generated raw activation input.
+- Fixed picker initialization validation, popup Escape/Enter and stale solution
+  paths. Added Ctrl+, and context-menu access to Settings.
+- Added deterministic A–H suites, concurrency tests, GPU colour validation, real
+  desktop capture/input integration and measured latency reports.
+
+## 1.0 — UI redesign
+
+- Introduced the native dark/purple UI, readable binds, Not Set defaults, picker,
+  atomic settings saves and tray integration.
+- Retained the supplied engine; runtime tests were skipped for that release at
+  the user's request. Version 1.1 supersedes that engine and includes tests.

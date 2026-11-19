@@ -1,91 +1,113 @@
-# Yami
+# Yami 1.1
 
-Native Windows desktop application, redesigned from the supplied Yami TB source.
-The executable and its Windows product description are both **Yami**. The process
-remains normally visible in Task Manager.
+Native Windows application with a small-region GPU detector and one synchronous
+output owner. The approved dark/purple interface remains 520 × 630 design units.
+Cursorless TB is the only new main-window control.
 
 ## Run
 
-Run `Yami.exe` on Windows 10/11 x64 with a Direct3D 11 capable display adapter.
-No separate .NET or Visual C++ runtime installation is required: the release
-build links the C++ runtime statically. Direct3D, DXGI, XInput, GDI+ and the
-Windows shell are operating-system components.
+Run `Yami.exe` on Windows 10/11 x64 with a Direct3D 11 feature-level 11.0 GPU.
+The C++ runtime is linked statically: no separate .NET or Visual C++ runtime is
+needed. D3D11, DXGI, D3DCompiler_47, GDI+, XInput and the shell are OS components.
+The executable/product name is Yami; its process remains visible in Task Manager.
 
-Fresh installations show **Not Set** for Toggle, Hold and Trigger. Existing
-settings are migrated by continuing to use `%APPDATA%\YamiTB\settings.ini`.
-Each binding change, applied colour, and launch preference is saved immediately.
-Save explicitly flushes the current configuration again. The application always
-starts disabled; enabled state is intentionally not restored.
+**Hold is mandatory in both modes.** The status switch, tray Enable and Toggle
+binding control master permission. They never substitute for Hold. Permission
+starts enabled, but no output is allowed until the assigned Hold is physically
+down. Releasing it invalidates in-flight results. Unassigned binds cannot activate.
 
-- Click a binding and press a key. Escape clears it. Clicking outside cancels.
-- Toggle and Hold accept keyboard, mouse and the source's existing XInput binds.
-- Trigger accepts **keyboard output only**, preserving the supplied simulation.
-  The supplied source incorrectly encoded mouse outputs as keyboard events;
-  this build prevents choosing those unsupported output bindings rather than
-  changing input simulation. Mouse buttons remain supported for Toggle/Hold.
-- For Left Mouse capture, click the same binding again; clicking elsewhere cancels.
-- Hold enables scanning while held. Toggle changes its latched activation state.
-- The supplied engine sends once per detection, then requires at least three
-  absent frames across 500 ms to rearm. It is not a continuous autofire loop.
-- Click the colour swatch or HEX value to open the hue ring, saturation/value
-  square and HEX editor. Apply commits the preview. Escape/outside dismisses it.
-  The eyedropper samples the desktop until the next mouse release.
-- Minimise removes the window and its taskbar button; detection remains available
-  through the tray. Double-click the purple tray icon to restore. Right-click
-  for Open, Enable, Settings and Exit. Closing the main window exits.
-- Settings contains Launch minimised to tray. `Yami.exe --tray` also starts hidden.
-- Start with Windows uses the ordinary current-user Run registry entry, named
-  `Yami`, pointing to `Yami.exe --tray`. Move the executable
-  before enabling startup. Disable the checkbox before deleting the application.
+- Click a binding to capture. Escape clears it; outside-click cancels. The new
+  input must be released before it can activate monitoring.
+- Toggle/Hold support keyboard, mouse and existing XInput bindings. Trigger
+  supports keyboard/mouse down-up pairs. Prefer different Hold/output keys:
+  synthetic key-up affects asynchronous key state if both use the same key.
+- Fresh bindings are Not Set. Existing settings remain compatible at
+  `%APPDATA%\YamiTB\settings.ini`.
+- The existing swatch/HEX picker, hue ring, saturation/value square and eyedropper
+  remain. Apply changes real shader parameters immediately; Escape cancels preview.
+- Binding changes, applied colours and options save automatically. Save flushes
+  again. The entire INI is replaced atomically.
 
-The application uses per-monitor DPI awareness and scales the UI to fit the
-monitor work area when the nominal size would exceed it. Auxiliary popups are
-kept within the available work area or dismissed when their DPI changes.
+## Modes and calibration
 
-## Build
+Cursorless TB off retains a circular ROI around the mouse, radius 50 px by
+default. Cursorless TB on uses a calibrated point in the actual Roblox client
+area, default radius 12 px. Production Yami never moves the mouse cursor.
 
-Install Visual Studio 2026 / Build Tools with **Desktop development with C++**,
-MSVC v145 and a Windows 10/11 SDK. Open `Yami TB.slnx`, select Release / x64,
-and build, or run from PowerShell:
+Open Settings from the tray, the main-window context menu or **Ctrl+,**. Select
+**Calibrate detection point**, then click the intended point inside a visible
+Roblox viewport. The temporary crosshair disappears when finished; Escape cancels.
+The point is saved as normalized client coordinates and resolved against current
+physical client dimensions/position, including windowed and stretched modes.
+Cursorless monitoring requires that Roblox client to be foreground and visible.
+
+The calibration is not character tracking. Recalibrate after camera/zoom changes
+as needed; no fixed point is guaranteed to intersect every character highlight.
+No permanent gameplay overlay is created. Roblox identity is checked through
+read-only process queries; no code is injected into it.
+
+## Options
+
+Numeric fields save when focus leaves them. Invalid values show a red outline
+and do not replace the previous valid configuration. Radius edits the active mode.
+
+| Setting | Default | Range |
+|---|---:|---:|
+| RGB tolerance, per channel | 2 | 0–16 |
+| Cursor radius | 50 px | 1–128 px |
+| Cursorless radius | 12 px | 1–128 px |
+| Clear debounce | 8 ms | 0–100 ms |
+| Clear confirmation | 2 frames | 2–16 frames |
+| Minimum output interval | 0 ms | 0–1000 ms |
+
+Both clear-frame confirmation and debounce must be satisfied before rearming.
+Capture failures/timeouts cannot count as clear. Minimum interval is independent;
+an appearance suppressed by it is consumed, never queued for delayed firing.
+
+## Tray and startup
+
+Minimise hides the main window/taskbar button while retaining the notification
+icon. Double-click restores. Its menu has Open, Enable, Settings and Exit. Closing
+the main window exits. One instance is permitted, Explorer restart restores the
+icon, and normal shutdown removes it and signals workers asynchronously.
+
+Settings offers Launch minimised to tray; `Yami.exe --tray` also starts hidden.
+Start with Windows uses the ordinary current-user Run entry named Yami. Move the
+executable before enabling startup; disable the checkbox before deleting it.
+
+## Build and tests
+
+Install Visual Studio 2026 / Build Tools, Desktop development with C++, MSVC v145
+and a Windows 10/11 SDK. Open `Yami TB.slnx` and build Release/x64, or run:
 
 ```powershell
 .\build.ps1
+.\build.ps1 -Test
 ```
 
-The script copies the result to `artifacts\Yami.exe`. The project can also be
-built directly using MSBuild with `/p:Configuration=Release /p:Platform=x64`.
-Earlier Visual Studio versions require retargeting the project's toolset.
+Outputs: `artifacts\Yami.exe`, `artifacts\YamiTests.exe`, and
+`artifacts\test-results`. The test project is `tests\Tests.vcxproj`. Older Visual
+Studio versions require retargeting the toolset. The HLSL is embedded in the EXE
+and compiled with D3DCompile, so no external shader file is needed to run Yami.
 
-## Source boundaries
+The test harness opens a controlled test receiver, emulates F23 Hold and F24
+output, and temporarily moves/restores the cursor for its cursor-mode case. Let
+it finish without changing focus. It does not connect to a game.
 
-- `Yami TB/engine.inc`: supplied timer, output-key preparation/simulation,
-  ScreenGrabber and ScannerThread bodies, retained verbatim.
-- `Yami TB/activation.inc`: supplied raw input/controller handling with binding
-  names, fresh-install defaults, capture clear/release protection and UI routing.
-- `Yami TB/settings.inc`: atomic settings replacement, validation and startup.
-- `Yami TB/frontend.inc`: native controls, custom drawing, picker and tray.
-- `Yami TB/Yami.rc`: icon and Windows file/product name metadata.
+## Source and verification
 
-The supplied source uses DXGI desktop duplication and an exact CPU RGB scan in
-a radius of 50 pixels around the cursor on the primary display. Despite stale
-GPU comments in that source, it contains no GPU detection shaders. The earlier
-standalone executable references shaders and is not established to be equivalent
-to this supplied source. This redesign is based on the supplied source.
+- `detection_core.h`: serialized states, tokens, debounce and stale-result rejection.
+- `gpu_detector.h` / `ColorDetect.hlsl`: DXGI capture, GPU ROI matching, reused
+  resources, nonblocking four-byte readback and timestamp queries.
+- `engine.inc`: Hold validation, client coordinates, capture recovery and sole
+  dispatcher. Background initialization avoids first-Hold device creation.
+- `activation.inc`, `settings.inc`, `frontend.inc`: inputs, persistence and native UI.
+- `reference/supplied-engine.inc.txt`: the supplied engine body for comparison.
+- `tests/`, `validation/`: harness and recorded results.
 
-## Verification status and inherited limits
-
-The original source and redesigned Release x64 source compile successfully.
-**No runtime, interaction, detection, output, tray, persistence, multi-monitor or
-DPI testing was performed**, at the user's explicit request. Preservation has
-not been functionally verified. Manual testing is required before relying on it.
-
-The engine's primary-monitor restriction and handling of DXGI access loss are
-unchanged. In particular, the supplied engine does not rebuild its duplication
-object after access loss; a display mode change or desktop switch may require
-restarting Yami. UI support for multiple monitors does not expand the detector's
-coverage. Existing mouse output values in older settings are reset to Not Set.
-
-Only one instance is allowed per Windows session to prevent duplicate tray icons.
-The tray icon is deleted on normal exit and re-added after Explorer restarts.
-Shutdown signals the original workers and waits asynchronously without blocking
-the UI message loop. No process hiding, injection or security-tool evasion is used.
+See [BENCHMARKS.md](BENCHMARKS.md) and [ENGINE-NOTES.md](ENGINE-NOTES.md). Controlled
+hardware tests passed; gameplay accuracy, perfect parries and sub-1 ms end-to-end
+latency are not guaranteed. Roblox gameplay/interactive calibration were not
+tested because no game viewport was open, and the referenced camera screenshots
+were not attached. Resolution/DPI coordinate tests were synthetic; actual OS DPI
+changes and rotated/HDR monitors were not manually exercised.

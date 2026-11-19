@@ -1,7 +1,6 @@
 <Solution>
   <Configurations>
     <Platform Name="x64" />
-    <Platform Name="x86" />
   </Configurations>
-  <Project Path="Mali TB/Mali TB.vcxproj" Id="76e31172-a8f6-44d1-beb5-dccc9ad5b44a" />
+  <Project Path="Yami TB/Yami TB.vcxproj" Id="76e31172-a8f6-44d1-beb5-dccc9ad5b44a" />
 </Solution>

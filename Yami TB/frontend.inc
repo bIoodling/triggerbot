@@ -4,7 +4,7 @@ namespace ui {
 constexpr float W=520, H=630;
 const Color bg(255,11,11,15), panel(255,18,18,22), border(255,34,34,40);
 const Color ink(255,242,242,245), dim(255,180,180,188), purple(255,186,117,255);
-HWND picker=nullptr, menu=nullptr, settings=nullptr, hex=nullptr;
+HWND picker=nullptr, menu=nullptr, settings=nullptr, hex=nullptr,calibration=nullptr;
 HINSTANCE instance{};
 HICON icon{};
 ULONG_PTR gdip{};
@@ -21,7 +21,7 @@ bool lastActive=false;
 std::wstring saveLabel=L"Save";
 constexpr int TOGGLE=101, COLOR=102, PRIMARY=103, HOLD=104, OUTPUT=105,
     STARTUP=106, SAVE=107, MINIMIZE=108, CLOSE=109, APPLY=110, EYE=111,
-    LAUNCH=112, SETTINGS_CLOSE=113;
+    LAUNCH=112, SETTINGS_CLOSE=113, CURSORLESS=114, CALIBRATE=115;
 constexpr UINT TRAY=WM_APP+50;
 struct Box { float x,y,w,h; };
 bool inside(Box b,float x,float y) {return x>=b.x&&y>=b.y&&x<b.x+b.w&&y<b.y+b.h;}
@@ -63,10 +63,11 @@ void toHsv(uint32_t color) {
 void invalidate() {if(g_hwnd)RedrawWindow(g_hwnd,nullptr,nullptr,RDW_INVALIDATE|RDW_ALLCHILDREN);}
 void cancelCapture() {
     g_activationCapture=false;g_activationCaptureArmed=false;g_captureWaitingForRelease=false;
-    g_toggleState=false;g_primaryKeyDown=false;g_holdKeyDown=false;UpdateActivationActive();
+    g_primaryKeyDown=false;g_holdKeyDown=false;UpdateActivationActive();
     invalidate();
 }
-void pause() {cancelCapture();}
+void pause() {g_engineSuspended=true;cancelCapture();}
+void resumeConfiguration() {if(!picker&&!settings&&!calibration){g_engineSuspended=false;UpdateActivationActive();}}
 float fitScale(HWND hwnd,float width,float height) {
     float dpi=float(GetDpiForWindow(hwnd))/96;
     MONITORINFO mi{sizeof(mi)};GetMonitorInfoW(MonitorFromWindow(hwnd,MONITOR_DEFAULTTONEAREST),&mi);
@@ -82,6 +83,7 @@ void layoutMain() {
     place(g_hwnd,PRIMARY,{300,356,180,40},scale);place(g_hwnd,HOLD,{300,415,180,40},scale);place(g_hwnd,OUTPUT,{300,474,180,40},scale);
     place(g_hwnd,STARTUP,{26,568,290,40},scale);place(g_hwnd,SAVE,{358,566,138,44},scale);
     place(g_hwnd,MINIMIZE,{396,22,48,44},scale);place(g_hwnd,CLOSE,{456,22,48,44},scale);
+    place(g_hwnd,CURSORLESS,{302,305,194,34},scale);
 }
 void sizeMain(const RECT* suggested=nullptr) {
     scale=fitScale(g_hwnd,W,H);int w=int(W*scale),h=int(H*scale);
@@ -95,7 +97,7 @@ void drawMain(Graphics& g) {
     g.Clear(bg);round(g,{.9f,.9f,W-1.8f,H-1.8f},16,bg,Color(255,61,61,67),1.8f);
     logo(g,37,30,32);text(g,L"Yami",{94,24,280,44},28,ink,true);
     round(g,{24,92,472,72},13,panel,border);
-    bool active=g_activationActive.load();Pen ring(active?purple:Color(255,95,95,103),2);
+    bool active=g_toggleState.load();Pen ring(active?purple:Color(255,95,95,103),2);
     g.DrawEllipse(&ring,43.f,117.f,22.f,22.f);
     if(active){SolidBrush dot(purple);g.FillEllipse(&dot,48.f,122.f,12.f,12.f);}
     text(g,active?L"Enabled":L"Disabled",{80,99,250,58},21);
@@ -118,7 +120,8 @@ void drawButton(const DRAWITEMSTRUCT& d,float s) {
     g.Clear(id==TOGGLE||id==COLOR||id==PRIMARY||id==HOLD||id==OUTPUT?panel:bg);
     if(id==MINIMIZE){line(g,15,22,31,22,dim,1.8f);return;}
     if(id==CLOSE||id==SETTINGS_CLOSE){line(g,w/2-7,h/2-7,w/2+7,h/2+7,dim,1.8f);line(g,w/2+7,h/2-7,w/2-7,h/2+7,dim,1.8f);return;}
-    if(id==TOGGLE){bool active=g_activationActive.load();round(g,{18,5,60,34},17,active?Color(255,141,77,204):Color(255,67,67,73));SolidBrush b(ink);g.FillEllipse(&b,active?49.f:21.f,8.f,28.f,28.f);return;}
+    if(id==TOGGLE){bool active=g_toggleState.load();round(g,{18,5,60,34},17,active?Color(255,141,77,204):Color(255,67,67,73));SolidBrush b(ink);g.FillEllipse(&b,active?49.f:21.f,8.f,28.f,28.f);return;}
+    if(id==CURSORLESS){bool active=ReadDetectionOptions().cursorless;round(g,{6,9,30,16},8,active?Color(255,141,77,204):Color(255,67,67,73));SolidBrush b(ink);g.FillEllipse(&b,active?22.f:8.f,11.f,12.f,12.f);text(g,L"Cursorless TB",{47,0,w-47,h},16,dim);return;}
     if(id==COLOR){round(g,{2,3,34,36},7,rgb(picker?draft:g_targetColor.load()));round(g,{44,1,w-46,h-2},8,Color(255,13,13,17),border);text(g,HexColor(picker?draft:g_targetColor.load()),{45,0,w-47,h},17,ink,false,true);return;}
     if(id==STARTUP||id==LAUNCH){drawCheck(g,id==STARTUP?g_startWindows:g_launchMinimized,2,(h-24)/2);text(g,id==STARTUP?L"Start with Windows":L"Launch minimised to tray",{42,0,w-42,h},17,dim);return;}
     if(id==EYE){round(g,{0,0,w,h},5,Color(255,29,29,35));line(g,12,29,26,15,ink,2);line(g,21,14,28,21,ink,2);line(g,12,29,10,33,ink,2);return;}
@@ -140,16 +143,16 @@ void updateBindings() {
 void tray(bool add=false) {
     NOTIFYICONDATAW data{sizeof(data)};data.hWnd=g_hwnd;data.uID=1;
     data.uFlags=NIF_ICON|NIF_MESSAGE|NIF_TIP;data.uCallbackMessage=TRAY;data.hIcon=icon;
-    wcscpy_s(data.szTip,g_activationActive.load()?L"Yami - Enabled":L"Yami - Disabled");
+    wcscpy_s(data.szTip,g_toggleState.load()?L"Yami - Enabled (Hold to monitor)":L"Yami - Disabled");
     if(add){if(trayAdded)return;trayAdded=Shell_NotifyIconW(NIM_ADD,&data)!=FALSE;if(trayAdded){data.uVersion=NOTIFYICON_VERSION_4;Shell_NotifyIconW(NIM_SETVERSION,&data);}}
     else if(trayAdded)Shell_NotifyIconW(NIM_MODIFY,&data);
 }
 void removeTray() {if(trayAdded){NOTIFYICONDATAW d{sizeof(d)};d.hWnd=g_hwnd;d.uID=1;Shell_NotifyIconW(NIM_DELETE,&d);trayAdded=false;}}
 void restore() {ShowWindow(g_hwnd,SW_RESTORE);SetForegroundWindow(g_hwnd);invalidate();}
 void hide() {if(picker)DestroyWindow(picker);if(settings)DestroyWindow(settings);if(g_activationCapture.load())cancelCapture();if(!trayAdded)tray(true);if(trayAdded)ShowWindow(g_hwnd,SW_HIDE);}
-void toggle() {if(g_activationCapture.load())return;g_toggleState=!g_activationActive.load();g_holdKeyDown=false;UpdateActivationActive();invalidate();tray();}
+void toggle() {if(g_activationCapture.load())return;g_toggleState=!g_toggleState.load();UpdateActivationActive();invalidate();tray();}
 void saved() {SaveSettings();saveLabel=g_saveFailed?L"Retry save":L"Saved";SetWindowTextW(GetDlgItem(g_hwnd,SAVE),saveLabel.c_str());SetTimer(g_hwnd,3,1600,nullptr);invalidate();}
-void commitColor() {if(!validHex)return;g_targetColor=draft;SaveSettings();DestroyWindow(picker);invalidate();}
+void commitColor() {if(!validHex)return;g_targetColor=draft;ResetEngineConfiguration();SaveSettings();DestroyWindow(picker);invalidate();}
 void updateDraft(bool updateText=true) {
     draft=hsv(hue,sat,val);validHex=true;
     if(updateText&&hex){settingHex=true;SetWindowTextW(hex,HexColor(draft).c_str());settingHex=false;}
@@ -183,7 +186,9 @@ WNDPROC oldHexProc{};
 LRESULT CALLBACK PickerProc(HWND hwnd,UINT msg,WPARAM w,LPARAM l) {
     switch(msg){
     case WM_CREATE:{picker=hwnd;pickerScale=float(GetDpiForWindow(hwnd))/96;draft=g_targetColor.load();toHsv(draft);validHex=true;
+        settingHex=true;
         hex=CreateWindowExW(0,L"EDIT",HexColor(draft).c_str(),WS_CHILD|WS_VISIBLE|WS_TABSTOP|ES_AUTOHSCROLL,0,0,1,1,hwnd,HMENU(200),instance,nullptr);
+        settingHex=false;
         SendMessageW(hex,EM_SETLIMITTEXT,7,0);editFont=CreateFontW(-int(18*pickerScale),0,0,0,FW_NORMAL,FALSE,FALSE,FALSE,DEFAULT_CHARSET,0,0,CLEARTYPE_QUALITY,0,L"Segoe UI");SendMessageW(hex,WM_SETFONT,WPARAM(editFont),TRUE);
         oldHexProc=reinterpret_cast<WNDPROC>(SetWindowLongPtrW(hex,GWLP_WNDPROC,LONG_PTR(hexProc)));
         control(hwnd,APPLY,L"Apply");control(hwnd,EYE,L"Pick screen colour");
@@ -194,6 +199,8 @@ LRESULT CALLBACK PickerProc(HWND hwnd,UINT msg,WPARAM w,LPARAM l) {
     case WM_DRAWITEM:drawButton(*reinterpret_cast<DRAWITEMSTRUCT*>(l),pickerScale);return TRUE;
     case WM_CTLCOLOREDIT:SetTextColor(HDC(w),RGB(242,242,245));SetBkColor(HDC(w),RGB(12,12,16));return LRESULT(editBrush);
     case WM_COMMAND:
+        if(LOWORD(w)==IDCANCEL){DestroyWindow(hwnd);return 0;}
+        if(LOWORD(w)==IDOK){commitColor();return 0;}
         if(LOWORD(w)==APPLY){commitColor();return 0;}
         if(LOWORD(w)==EYE){eyedrop=true;SetCapture(hwnd);SetCursor(LoadCursorW(nullptr,IDC_CROSS));return 0;}
         if(LOWORD(w)==200&&HIWORD(w)==EN_CHANGE&&!settingHex){wchar_t buffer[32]{};GetWindowTextW(hex,buffer,ARRAYSIZE(buffer));uint32_t c=0;validHex=ParseHex(buffer,c);if(validHex){draft=c;toHsv(c);}EnableWindow(GetDlgItem(hwnd,APPLY),validHex);InvalidateRect(hwnd,nullptr,FALSE);invalidate();return 0;}break;
@@ -205,7 +212,7 @@ LRESULT CALLBACK PickerProc(HWND hwnd,UINT msg,WPARAM w,LPARAM l) {
     case WM_KEYDOWN:if(w==VK_ESCAPE){DestroyWindow(hwnd);return 0;}if(w==VK_RETURN){commitColor();return 0;}break;
     case WM_ACTIVATE:if(LOWORD(w)==WA_INACTIVE&&!eyedrop){DestroyWindow(hwnd);return 0;}break;
     case WM_DPICHANGED:DestroyWindow(hwnd);return 0;
-    case WM_DESTROY:picker=nullptr;hex=nullptr;drag=0;eyedrop=false;if(editFont){DeleteObject(editFont);editFont=nullptr;}invalidate();return 0;
+    case WM_DESTROY:picker=nullptr;hex=nullptr;drag=0;eyedrop=false;if(editFont){DeleteObject(editFont);editFont=nullptr;}resumeConfiguration();invalidate();return 0;
     }return DefWindowProcW(hwnd,msg,w,l);
 }
 LRESULT CALLBACK hexProc(HWND hwnd,UINT msg,WPARAM w,LPARAM l){if(msg==WM_KEYDOWN&&w==VK_RETURN){commitColor();return 0;}if(msg==WM_KEYDOWN&&w==VK_ESCAPE){DestroyWindow(picker);return 0;}return CallWindowProcW(oldHexProc,hwnd,msg,w,l);}
@@ -216,21 +223,81 @@ void showPicker(){if(picker){SetForegroundWindow(picker);return;}pause();RECT r{
     x=(std::clamp)(x,int(mi.rcWork.left),int(mi.rcWork.right-width));y=(std::clamp)(y,int(mi.rcWork.top),int(mi.rcWork.bottom-height));
     HWND p=CreateWindowExW(WS_EX_TOOLWINDOW,L"YamiColorPicker",L"Colour",WS_POPUP,x,y,width,height,g_hwnd,nullptr,instance,nullptr);
     windowRegion(p,width,height,pickerScale);ShowWindow(p,SW_SHOW);SetForegroundWindow(p);SetFocus(hex);}
-void drawSettings(Graphics& g){g.Clear(bg);round(g,{1,1,358,198},15,bg,Color(255,61,61,67),1.8f);text(g,L"Settings",{24,16,280,40},23,ink,true);}
+
+std::array<bool,5> numericValid{true,true,true,true,true};
+HFONT settingsFont{};
+constexpr float settingsWidth=400,settingsHeight=462;
+void startCalibration();
+void drawSettings(Graphics& g){
+    g.Clear(bg);round(g,{1,1,398,460},15,bg,Color(255,61,61,67),1.8f);
+    text(g,L"Settings",{24,16,300,40},23,ink,true);
+    const wchar_t* labels[]={L"Tolerance (RGB)",L"Region radius (px)",L"Clear debounce (ms)",L"Clear frames",L"Minimum interval (ms)"};
+    for(int i=0;i<5;++i){float y=174+38.f*i;text(g,labels[i],{24,y,250,30},16,dim);round(g,{280,y,96,30},6,Color(255,12,12,16),numericValid[i]?border:Color(255,237,99,118));}
+}
+void fillNumeric(HWND hwnd){
+    auto o=ReadDetectionOptions();double values[]={double(o.tolerance),double(o.cursorless?o.fixedRadius:o.cursorRadius),o.clearMs,double(o.clearFrames),o.minimumIntervalMs};
+    for(int i=0;i<5;++i){wchar_t value[32];swprintf_s(value,L"%.4g",values[i]);SetWindowTextW(GetDlgItem(hwnd,300+i),value);numericValid[i]=true;}
+}
 LRESULT CALLBACK SettingsProc(HWND hwnd,UINT msg,WPARAM w,LPARAM l){switch(msg){
-    case WM_CREATE:settings=hwnd;settingsScale=float(GetDpiForWindow(hwnd))/96;control(hwnd,LAUNCH,L"Launch minimised to tray");control(hwnd,STARTUP,L"Start with Windows");control(hwnd,SETTINGS_CLOSE,L"Close settings");place(hwnd,LAUNCH,{24,76,312,40},settingsScale);place(hwnd,STARTUP,{24,126,312,40},settingsScale);place(hwnd,SETTINGS_CLOSE,{306,16,36,40},settingsScale);return 0;
+    case WM_CREATE:{settings=hwnd;settingsScale=float(GetDpiForWindow(hwnd))/96;
+        control(hwnd,LAUNCH,L"Launch minimised to tray");control(hwnd,STARTUP,L"Start with Windows");control(hwnd,SETTINGS_CLOSE,L"Close settings");control(hwnd,CALIBRATE,ReadDetectionOptions().calibrated?L"Recalibrate detection point":L"Calibrate detection point");
+        place(hwnd,LAUNCH,{24,68,352,36},settingsScale);place(hwnd,STARTUP,{24,110,352,36},settingsScale);place(hwnd,SETTINGS_CLOSE,{340,16,36,40},settingsScale);place(hwnd,CALIBRATE,{24,392,352,44},settingsScale);
+        settingsFont=CreateFontW(-int(16*settingsScale),0,0,0,FW_NORMAL,FALSE,FALSE,FALSE,DEFAULT_CHARSET,0,0,CLEARTYPE_QUALITY,0,L"Segoe UI");
+        for(int i=0;i<5;++i){HWND edit=CreateWindowExW(0,L"EDIT",L"",WS_CHILD|WS_VISIBLE|WS_TABSTOP|ES_CENTER|ES_AUTOHSCROLL,int(286*settingsScale),int((178+38*i)*settingsScale),int(84*settingsScale),int(24*settingsScale),hwnd,HMENU(INT_PTR(300+i)),instance,nullptr);SendMessageW(edit,WM_SETFONT,WPARAM(settingsFont),TRUE);SendMessageW(edit,EM_SETLIMITTEXT,8,0);}
+        fillNumeric(hwnd);return 0;}
     case WM_ERASEBKGND:return 1;case WM_PAINT:paint(hwnd,settingsScale,drawSettings);return 0;
+    case WM_CTLCOLOREDIT:SetTextColor(HDC(w),RGB(242,242,245));SetBkColor(HDC(w),RGB(12,12,16));return LRESULT(editBrush);
     case WM_DRAWITEM:drawButton(*reinterpret_cast<DRAWITEMSTRUCT*>(l),settingsScale);return TRUE;
-    case WM_COMMAND:if(LOWORD(w)==SETTINGS_CLOSE)DestroyWindow(hwnd);else if(LOWORD(w)==LAUNCH){g_launchMinimized=!g_launchMinimized;SaveSettings();InvalidateRect(hwnd,nullptr,FALSE);}else if(LOWORD(w)==STARTUP){if(SetStartup(!g_startWindows))g_startWindows=!g_startWindows;else MessageBoxW(hwnd,L"Windows startup could not be updated.",L"Yami",MB_OK|MB_ICONERROR);InvalidateRect(hwnd,nullptr,FALSE);invalidate();}return 0;
+    case WM_COMMAND:{int id=LOWORD(w);
+        if(id==IDCANCEL){DestroyWindow(hwnd);return 0;}
+        if(id>=300&&id<=304&&HIWORD(w)==EN_KILLFOCUS){int index=id-300;wchar_t value[32]{};GetWindowTextW(GetDlgItem(hwnd,id),value,ARRAYSIZE(value));wchar_t* end=nullptr;double n=wcstod(value,&end);
+            const double minimum[]={0,1,0,2,0},maximum[]={16,128,100,16,1000};
+            bool integer=index==0||index==1||index==3;
+            numericValid[index]=end!=value&&*end==0&&std::isfinite(n)&&n>=minimum[index]&&n<=maximum[index]&&(!integer||std::floor(n)==n);
+            if(numericValid[index]){EditDetectionOptions([&](DetectionOptions& o){if(index==0)o.tolerance=unsigned(n);else if(index==1){if(o.cursorless)o.fixedRadius=unsigned(n);else o.cursorRadius=unsigned(n);}else if(index==2)o.clearMs=n;else if(index==3)o.clearFrames=unsigned(n);else o.minimumIntervalMs=n;});SaveSettings();}
+            InvalidateRect(hwnd,nullptr,FALSE);return 0;}
+        if(id==SETTINGS_CLOSE)DestroyWindow(hwnd);
+        else if(id==LAUNCH){g_launchMinimized=!g_launchMinimized;SaveSettings();InvalidateRect(hwnd,nullptr,FALSE);}
+        else if(id==STARTUP){if(SetStartup(!g_startWindows))g_startWindows=!g_startWindows;else MessageBoxW(hwnd,L"Windows startup could not be updated.",L"Yami",MB_OK|MB_ICONERROR);InvalidateRect(hwnd,nullptr,FALSE);invalidate();}
+        else if(id==CALIBRATE)startCalibration();return 0;}
     case WM_KEYDOWN:if(w==VK_ESCAPE)DestroyWindow(hwnd);return 0;
     case WM_DPICHANGED:DestroyWindow(hwnd);return 0;
-    case WM_DESTROY:settings=nullptr;return 0;
-    }return DefWindowProcW(hwnd,msg,w,l);}
-void showSettings(){restore();pause();if(settings){SetForegroundWindow(settings);return;}RECT r{};GetWindowRect(g_hwnd,&r);float s=float(GetDpiForWindow(g_hwnd))/96;HWND p=CreateWindowExW(WS_EX_TOOLWINDOW,L"YamiSettings",L"Yami Settings",WS_POPUP,r.left+int(80*scale),r.top+int(160*scale),int(360*s),int(200*s),g_hwnd,nullptr,instance,nullptr);windowRegion(p,int(360*s),int(200*s),s);ShowWindow(p,SW_SHOW);SetForegroundWindow(p);}
+    case WM_DESTROY:settings=nullptr;if(settingsFont){DeleteObject(settingsFont);settingsFont=nullptr;}resumeConfiguration();return 0;
+    }return DefWindowProcW(hwnd,msg,w,l);
+}
+void showSettings(){restore();pause();if(settings){SetForegroundWindow(settings);return;}
+    RECT r{};GetWindowRect(g_hwnd,&r);float s=fitScale(g_hwnd,settingsWidth,settingsHeight);
+    MONITORINFO mi{sizeof(mi)};GetMonitorInfoW(MonitorFromWindow(g_hwnd,MONITOR_DEFAULTTONEAREST),&mi);int width=int(settingsWidth*s),height=int(settingsHeight*s);
+    int x=std::clamp(int(r.left+60*scale),int(mi.rcWork.left),int(mi.rcWork.right-width)),y=std::clamp(int(r.top+90*scale),int(mi.rcWork.top),int(mi.rcWork.bottom-height));
+    HWND p=CreateWindowExW(WS_EX_TOOLWINDOW,L"YamiSettings",L"Yami Settings",WS_POPUP,x,y,width,height,g_hwnd,nullptr,instance,nullptr);settingsScale=s;
+    // Normally scale is the monitor DPI. On a very small work area, controls
+    // are compressed with the same fit ratio as the main configuration window.
+    if(settingsScale!=float(GetDpiForWindow(p))/96){place(p,LAUNCH,{24,68,352,36},s);place(p,STARTUP,{24,110,352,36},s);place(p,SETTINGS_CLOSE,{340,16,36,40},s);place(p,CALIBRATE,{24,392,352,44},s);for(int i=0;i<5;++i)MoveWindow(GetDlgItem(p,300+i),int(286*s),int((178+38*i)*s),int(84*s),int(24*s),TRUE);}
+    windowRegion(p,width,height,s);ShowWindow(p,SW_SHOW);SetForegroundWindow(p);
+}
+LRESULT CALLBACK CalibrationProc(HWND hwnd,UINT msg,WPARAM w,LPARAM l){switch(msg){
+    case WM_CREATE:calibration=hwnd;SetLayeredWindowAttributes(hwnd,RGB(1,1,1),0,LWA_COLORKEY);return 0;
+    case WM_ERASEBKGND:return 1;
+    case WM_PAINT:{PAINTSTRUCT ps{};HDC dc=BeginPaint(hwnd,&ps);RECT rect{};GetClientRect(hwnd,&rect);HBRUSH background=CreateSolidBrush(RGB(1,1,1));FillRect(dc,&rect,background);DeleteObject(background);
+        POINT p{};GetCursorPos(&p);ScreenToClient(hwnd,&p);HPEN pen=CreatePen(PS_SOLID,2,RGB(186,117,255));auto old=SelectObject(dc,pen);auto oldBrush=SelectObject(dc,GetStockObject(NULL_BRUSH));Ellipse(dc,p.x-8,p.y-8,p.x+9,p.y+9);MoveToEx(dc,p.x-16,p.y,nullptr);LineTo(dc,p.x+17,p.y);MoveToEx(dc,p.x,p.y-16,nullptr);LineTo(dc,p.x,p.y+17);SelectObject(dc,oldBrush);SelectObject(dc,old);DeleteObject(pen);SetTextColor(dc,RGB(242,242,245));SetBkMode(dc,TRANSPARENT);const wchar_t* help=L"Select a point inside the Roblox viewport. Escape cancels.";TextOutW(dc,24,24,help,int(wcslen(help)));EndPaint(hwnd,&ps);return 0;}
+    case WM_MOUSEMOVE:InvalidateRect(hwnd,nullptr,FALSE);return 0;
+    case WM_LBUTTONUP:{POINT p{};GetCursorPos(&p);ReleaseCapture();ShowWindow(hwnd,SW_HIDE);HWND target=GetAncestor(WindowFromPoint(p),GA_ROOT);yami::Viewport viewport;
+        bool valid=IsRobloxWindow(target)&&ClientViewport(target,viewport)&&p.x>=viewport.x&&p.x<viewport.x+viewport.width&&p.y>=viewport.y&&p.y<viewport.y+viewport.height;
+        if(valid){g_viewportHint=uintptr_t(target);EditDetectionOptions([&](DetectionOptions& o){o.normalizedX=double(p.x-viewport.x)/viewport.width;o.normalizedY=double(p.y-viewport.y)/viewport.height;o.calibrated=true;});SaveSettings();if(settings)SetWindowTextW(GetDlgItem(settings,CALIBRATE),L"Recalibrate detection point");}
+        DestroyWindow(hwnd);if(settings)SetForegroundWindow(settings);if(!valid)MessageBoxW(settings,L"Calibration needs a point inside a visible Roblox client area. Use Calibrate to try again.",L"Yami",MB_OK|MB_ICONINFORMATION);return 0;}
+    case WM_KEYDOWN:if(w==VK_ESCAPE){ReleaseCapture();DestroyWindow(hwnd);if(settings)SetForegroundWindow(settings);}return 0;
+    case WM_COMMAND:if(LOWORD(w)==IDCANCEL){ShowWindow(hwnd,SW_HIDE);ReleaseCapture();DestroyWindow(hwnd);if(settings)SetForegroundWindow(settings);}return 0;
+    case WM_CAPTURECHANGED:if(calibration==hwnd&&HWND(l)!=hwnd&&IsWindowVisible(hwnd))DestroyWindow(hwnd);return 0;
+    case WM_DESTROY:calibration=nullptr;resumeConfiguration();return 0;
+    }return DefWindowProcW(hwnd,msg,w,l);
+}
+void startCalibration(){if(calibration)return;pause();int x=GetSystemMetrics(SM_XVIRTUALSCREEN),y=GetSystemMetrics(SM_YVIRTUALSCREEN),w=GetSystemMetrics(SM_CXVIRTUALSCREEN),h=GetSystemMetrics(SM_CYVIRTUALSCREEN);
+    HWND overlay=CreateWindowExW(WS_EX_LAYERED|WS_EX_TOPMOST|WS_EX_TOOLWINDOW,L"YamiCalibration",L"Yami Calibration",WS_POPUP,x,y,w,h,g_hwnd,nullptr,instance,nullptr);ShowWindow(overlay,SW_SHOW);SetForegroundWindow(overlay);SetFocus(overlay);SetCapture(overlay);
+}
 void drawMenu(Graphics& g){g.Clear(bg);round(g,{1,1,222,214},14,Color(255,15,15,19),Color(255,61,61,67),1.8f);
     const wchar_t* labels[]={L"Open",L"Enable",L"Settings",L"Exit"};for(int i=0;i<4;++i){float y=8+i*50.f;if(i==menuHover)round(g,{8,y,208,48},8,Color(255,31,31,37));text(g,labels[i],{80,y,130,48},20);}
     line(g,35,31,42,38,ink,1.8f);line(g,42,38,54,23,ink,1.8f);
-    round(g,{33,75,24,16},8,Color(255,15,15,19),dim,1.6f);SolidBrush b(g_activationActive.load()?purple:dim);g.FillEllipse(&b,g_activationActive.load()?45.f:35.f,78.f,10.f,10.f);
+    round(g,{33,75,24,16},8,Color(255,15,15,19),dim,1.6f);SolidBrush b(g_toggleState.load()?purple:dim);g.FillEllipse(&b,g_toggleState.load()?45.f:35.f,78.f,10.f,10.f);
     Pen gear(dim,1.7f);g.DrawEllipse(&gear,35.f,123.f,20.f,20.f);g.DrawEllipse(&gear,41.f,129.f,8.f,8.f);
     for(int i=0;i<8;++i){double a=i*3.141592653589793/4;line(g,45+10*float(cos(a)),133+10*float(sin(a)),45+13*float(cos(a)),133+13*float(sin(a)),dim,2);}
     g.DrawArc(&gear,35.f,173.f,20.f,20.f,-55.f,290.f);line(g,45,171,45,182,ink,1.8f);
@@ -248,9 +315,9 @@ void showMenu(POINT p){if(menu){DestroyWindow(menu);return;}MONITORINFO mi{sizeo
     menuScale=float(GetDpiForWindow(g_hwnd))/96;int width=int(224*menuScale),height=int(216*menuScale);int x=(std::clamp)(int(p.x-width/2),int(mi.rcWork.left),int(mi.rcWork.right-width)),y=(std::clamp)(int(p.y-height),int(mi.rcWork.top),int(mi.rcWork.bottom-height));
     HWND m=CreateWindowExW(WS_EX_TOOLWINDOW|WS_EX_TOPMOST,L"YamiTrayMenu",L"Yami",WS_POPUP,x,y,width,height,g_hwnd,nullptr,instance,nullptr);windowRegion(m,width,height,menuScale);SetForegroundWindow(m);ShowWindow(m,SW_SHOW);SetFocus(m);}
 HICON makeIcon(){HDC dc=GetDC(nullptr);HDC mem=CreateCompatibleDC(dc);BITMAPV5HEADER header{};header.bV5Size=sizeof(header);header.bV5Width=32;header.bV5Height=-32;header.bV5Planes=1;header.bV5BitCount=32;header.bV5Compression=BI_BITFIELDS;header.bV5RedMask=0x00FF0000;header.bV5GreenMask=0x0000FF00;header.bV5BlueMask=0x000000FF;header.bV5AlphaMask=0xFF000000;void* bits{};HBITMAP color=CreateDIBSection(dc,reinterpret_cast<BITMAPINFO*>(&header),DIB_RGB_COLORS,&bits,nullptr,0);auto old=SelectObject(mem,color);{Graphics g(mem);g.Clear(Color(0,0,0,0));g.SetSmoothingMode(SmoothingModeAntiAlias);logo(g,4,5,24);}HBITMAP mask=CreateBitmap(32,32,1,1,nullptr);ICONINFO info{TRUE,0,0,mask,color};HICON result=CreateIconIndirect(&info);SelectObject(mem,old);DeleteObject(mask);DeleteObject(color);DeleteDC(mem);ReleaseDC(nullptr,dc);return result;}
-void startShutdown(){if(closing)return;closing=true;pause();SaveSettings();if(picker)DestroyWindow(picker);if(settings)DestroyWindow(settings);if(menu)DestroyWindow(menu);removeTray();ShowWindow(g_hwnd,SW_HIDE);g_running=false;if(g_activationWakeEvent)SetEvent(g_activationWakeEvent);SetTimer(g_hwnd,2,25,nullptr);}
+void startShutdown(){if(closing)return;closing=true;pause();SaveSettings();if(picker)DestroyWindow(picker);if(settings)DestroyWindow(settings);if(calibration)DestroyWindow(calibration);if(menu)DestroyWindow(menu);removeTray();ShowWindow(g_hwnd,SW_HIDE);g_running=false;if(g_activationWakeEvent)SetEvent(g_activationWakeEvent);SetTimer(g_hwnd,2,25,nullptr);}
 LRESULT CALLBACK MainProc(HWND hwnd,UINT msg,WPARAM w,LPARAM l){if(taskbarCreated&&msg==taskbarCreated){trayAdded=false;tray(true);return 0;}switch(msg){
-    case WM_CREATE:g_hwnd=hwnd;control(hwnd,TOGGLE,L"Enable");control(hwnd,COLOR,L"Target colour");control(hwnd,PRIMARY,L"Not Set");control(hwnd,HOLD,L"Not Set");control(hwnd,OUTPUT,L"Not Set");control(hwnd,STARTUP,L"Start with Windows");control(hwnd,SAVE,L"Save");control(hwnd,MINIMIZE,L"Minimise");control(hwnd,CLOSE,L"Exit");if(!RegisterRawActivationInput(hwnd)){MessageBoxW(hwnd,L"Keyboard and mouse input registration failed.",L"Yami",MB_OK|MB_ICONERROR);return -1;}return 0;
+    case WM_CREATE:g_hwnd=hwnd;control(hwnd,TOGGLE,L"Enable");control(hwnd,COLOR,L"Target colour");control(hwnd,PRIMARY,L"Not Set");control(hwnd,HOLD,L"Not Set");control(hwnd,OUTPUT,L"Not Set");control(hwnd,STARTUP,L"Start with Windows");control(hwnd,SAVE,L"Save");control(hwnd,MINIMIZE,L"Minimise");control(hwnd,CLOSE,L"Exit");control(hwnd,CURSORLESS,L"Cursorless TB");if(!RegisterRawActivationInput(hwnd)){MessageBoxW(hwnd,L"Keyboard and mouse input registration failed.",L"Yami",MB_OK|MB_ICONERROR);return -1;}return 0;
     case WM_ERASEBKGND:return 1;case WM_PAINT:paint(hwnd,scale,drawMain);return 0;
     case WM_DRAWITEM:drawButton(*reinterpret_cast<DRAWITEMSTRUCT*>(l),scale);return TRUE;
     case WM_INPUT:HandleRawActivationInput(reinterpret_cast<HRAWINPUT>(l));return DefWindowProcW(hwnd,msg,w,l);
@@ -258,15 +325,17 @@ LRESULT CALLBACK MainProc(HWND hwnd,UINT msg,WPARAM w,LPARAM l){if(taskbarCreate
     case WM_APP+42:SaveSettings();updateBindings();return 0;
     case WM_APP+43:CompleteBindCapture(int(w));return 0;
     case WM_COMMAND:{int id=LOWORD(w);if(suppressBindClick&&(id==PRIMARY||id==HOLD||id==OUTPUT)){suppressBindClick=false;return 0;}if(g_activationCapture.load()&&id!=PRIMARY&&id!=HOLD&&id!=OUTPUT)cancelCapture();
-        if(id==TOGGLE)toggle();else if(id==COLOR)showPicker();else if(id==PRIMARY||id==HOLD||id==OUTPUT){BeginActivationCapture(id==PRIMARY?ActivationCaptureTarget::Primary:id==HOLD?ActivationCaptureTarget::Hold:ActivationCaptureTarget::Output);g_captureWaitingForRelease=false;g_activationCaptureArmed=true;SetWindowTextW(GetDlgItem(hwnd,id),L"Press a key...");}
+        if(id==CURSORLESS){EditDetectionOptions([](DetectionOptions& o){o.cursorless=!o.cursorless;});SaveSettings();invalidate();if(settings)fillNumeric(settings);}else if(id==TOGGLE)toggle();else if(id==COLOR)showPicker();else if(id==PRIMARY||id==HOLD||id==OUTPUT){BeginActivationCapture(id==PRIMARY?ActivationCaptureTarget::Primary:id==HOLD?ActivationCaptureTarget::Hold:ActivationCaptureTarget::Output);g_captureWaitingForRelease=false;g_activationCaptureArmed=true;SetWindowTextW(GetDlgItem(hwnd,id),L"Press a key...");}
         else if(id==SAVE)saved();else if(id==MINIMIZE)hide();else if(id==CLOSE)startShutdown();else if(id==STARTUP){if(SetStartup(!g_startWindows))g_startWindows=!g_startWindows;else MessageBoxW(hwnd,L"Windows startup could not be updated.",L"Yami",MB_OK|MB_ICONERROR);SaveSettings();invalidate();}return 0;}
     case WM_LBUTTONDOWN:if(g_activationCapture.load())cancelCapture();if(GET_Y_LPARAM(l)<int(88*scale)){ReleaseCapture();SendMessageW(hwnd,WM_NCLBUTTONDOWN,HTCAPTION,l);}return 0;
+    case WM_CONTEXTMENU:{POINT point{};GetCursorPos(&point);showMenu(point);return 0;}
+    case WM_KEYDOWN:if(w==VK_OEM_COMMA&&(GetKeyState(VK_CONTROL)&0x8000)&&!g_activationCapture.load()){showSettings();return 0;}break;
     case WM_ACTIVATE:if(LOWORD(w)==WA_INACTIVE&&g_activationCapture.load())cancelCapture();return 0;
     case WM_SYSCOMMAND:if((w&0xFFF0)==SC_MINIMIZE){hide();return 0;}break;
     case WM_SIZE:if(w==SIZE_MINIMIZED)hide();return 0;
     case WM_DPICHANGED:if(picker)DestroyWindow(picker);if(settings)DestroyWindow(settings);sizeMain(reinterpret_cast<RECT*>(l));return 0;
     case TRAY:{UINT event=LOWORD(l);if(event==WM_LBUTTONDBLCLK||event==NIN_SELECT||event==NIN_KEYSELECT)restore();else if(event==WM_CONTEXTMENU||event==WM_RBUTTONUP){POINT p{};GetCursorPos(&p);showMenu(p);}return 0;}
-    case WM_TIMER:if(w==1){bool active=g_activationActive.load();if(active!=lastActive){lastActive=active;invalidate();tray();}}else if(w==2){if(g_activationWakeEvent)SetEvent(g_activationWakeEvent);bool done=(!g_scannerThread||WaitForSingleObject(g_scannerThread,0)==WAIT_OBJECT_0)&&(!g_controllerThread||WaitForSingleObject(g_controllerThread,0)==WAIT_OBJECT_0);if(done)DestroyWindow(hwnd);}else if(w==3){KillTimer(hwnd,3);SetWindowTextW(GetDlgItem(hwnd,SAVE),L"Save");}return 0;
+    case WM_TIMER:if(w==1){bool active=g_toggleState.load();if(active!=lastActive){lastActive=active;invalidate();tray();}}else if(w==2){if(g_activationWakeEvent)SetEvent(g_activationWakeEvent);bool done=(!g_scannerThread||WaitForSingleObject(g_scannerThread,0)==WAIT_OBJECT_0)&&(!g_controllerThread||WaitForSingleObject(g_controllerThread,0)==WAIT_OBJECT_0);if(done)DestroyWindow(hwnd);}else if(w==3){KillTimer(hwnd,3);SetWindowTextW(GetDlgItem(hwnd,SAVE),L"Save");}return 0;
     case WM_CLOSE:startShutdown();return 0;
     case WM_DESTROY:removeTray();KillTimer(hwnd,1);KillTimer(hwnd,2);if(g_scannerThread){CloseHandle(g_scannerThread);g_scannerThread=nullptr;}if(g_controllerThread){CloseHandle(g_controllerThread);g_controllerThread=nullptr;}if(g_activationWakeEvent){CloseHandle(g_activationWakeEvent);g_activationWakeEvent=nullptr;}PostQuitMessage(0);return 0;
     }return DefWindowProcW(hwnd,msg,w,l);}
@@ -281,13 +350,10 @@ bool ConsumeBindingInput(int vk,bool down,bool up)
         if(down){
             if(vk==VK_LBUTTON){POINT p{};GetCursorPos(&p);HWND hit=WindowFromPoint(p);HWND activeButton=GetDlgItem(g_hwnd,int(g_activationCaptureTarget.load())==0?ui::PRIMARY:int(g_activationCaptureTarget.load())==1?ui::HOLD:ui::OUTPUT);
                 if(hit!=activeButton){ui::cancelCapture();return true;}ui::suppressBindClick=true;}
-            // Mouse output is unsupported by the supplied keyboard-only
-            // simulation. Preserve it until the user authorizes a mapping fix.
-            if(g_activationCaptureTarget.load()==ActivationCaptureTarget::Output&&(vk==VK_LBUTTON||vk==VK_RBUTTON||vk==VK_MBUTTON||vk==VK_XBUTTON1||vk==VK_XBUTTON2))return true;
             CompleteBindCapture(vk);
         }return true;
     }
-    if(ui::picker||ui::settings||ui::menu)return true;
+    if(ui::picker||ui::settings||ui::menu||ui::calibration){if(up)HandleActivationEvent(vk,false,true);return true;}
     if(vk==VK_LBUTTON||vk==VK_RBUTTON||vk==VK_MBUTTON||vk==VK_XBUTTON1||vk==VK_XBUTTON2){POINT p{};GetCursorPos(&p);HWND hit=WindowFromPoint(p);if(hit==g_hwnd||IsChild(g_hwnd,hit)){if(up){HandleActivationEvent(vk,false,true);}return true;}}
     return false;
 }
@@ -300,7 +366,7 @@ int WINAPI WinMain(HINSTANCE instance,HINSTANCE,LPSTR,int)
     if(GdiplusStartup(&ui::gdip,&startup,nullptr)!=Ok){if(single)CloseHandle(single);return 1;}
     ui::editBrush=CreateSolidBrush(RGB(12,12,16));ui::icon=HICON(LoadImageW(instance,MAKEINTRESOURCEW(1),IMAGE_ICON,32,32,LR_DEFAULTCOLOR));if(!ui::icon)ui::icon=ui::makeIcon();
     struct Class{const wchar_t* name;WNDPROC proc;};
-    for(auto c:{Class{L"YamiMain",ui::MainProc},Class{L"YamiColorPicker",ui::PickerProc},Class{L"YamiTrayMenu",ui::MenuProc},Class{L"YamiSettings",ui::SettingsProc}}){WNDCLASSEXW wc{sizeof(wc)};wc.hInstance=instance;wc.lpfnWndProc=c.proc;wc.lpszClassName=c.name;wc.hCursor=LoadCursorW(nullptr,IDC_ARROW);wc.hIcon=ui::icon;wc.hIconSm=ui::icon;RegisterClassExW(&wc);}
+    for(auto c:{Class{L"YamiMain",ui::MainProc},Class{L"YamiColorPicker",ui::PickerProc},Class{L"YamiTrayMenu",ui::MenuProc},Class{L"YamiSettings",ui::SettingsProc},Class{L"YamiCalibration",ui::CalibrationProc}}){WNDCLASSEXW wc{sizeof(wc)};wc.hInstance=instance;wc.lpfnWndProc=c.proc;wc.lpszClassName=c.name;wc.hCursor=LoadCursorW(nullptr,IDC_ARROW);wc.hIcon=ui::icon;wc.hIconSm=ui::icon;RegisterClassExW(&wc);}
     LoadSettings();ui::taskbarCreated=RegisterWindowMessageW(L"TaskbarCreated");
     HWND hwnd=CreateWindowExW(WS_EX_APPWINDOW,L"YamiMain",L"Yami",WS_POPUP|WS_SYSMENU|WS_MINIMIZEBOX|WS_CLIPCHILDREN,100,100,520,630,nullptr,nullptr,instance,nullptr);
     if(!hwnd){DeleteObject(ui::editBrush);DestroyIcon(ui::icon);GdiplusShutdown(ui::gdip);if(single)CloseHandle(single);return 1;}
@@ -313,7 +379,7 @@ int WINAPI WinMain(HINSTANCE instance,HINSTANCE,LPSTR,int)
     SetTimer(hwnd,1,100,nullptr);
     bool trayCommand=wcsstr(GetCommandLineW(),L"--tray")!=nullptr;
     if(!ui::closing&&(!(g_launchMinimized||trayCommand)||!ui::trayAdded))ShowWindow(hwnd,SW_SHOW);
-    MSG msg{};while(GetMessageW(&msg,nullptr,0,0)>0){HWND dialog=ui::picker?ui::picker:ui::settings?ui::settings:hwnd;
+    MSG msg{};while(GetMessageW(&msg,nullptr,0,0)>0){HWND dialog=ui::calibration?ui::calibration:ui::picker?ui::picker:ui::settings?ui::settings:hwnd;
         if(!g_activationCapture.load()&&IsDialogMessageW(dialog,&msg))continue;TranslateMessage(&msg);DispatchMessageW(&msg);}
     DestroyIcon(ui::icon);DeleteObject(ui::editBrush);GdiplusShutdown(ui::gdip);if(single)CloseHandle(single);return int(msg.wParam);
 }

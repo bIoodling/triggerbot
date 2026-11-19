@@ -1,0 +1,23 @@
+PASS A continuous colour: 500 ms, exactly one
+PASS B brief single-frame flicker: no duplicate
+PASS C qualified clear: exactly two appearances
+PASS D Hold release rejects all queued/stale completions
+PASS E rapid transitions: 100 qualified appearances
+PASS F normalized coordinates, DPI/negative origins/window sizes
+PASS G RGB reference tolerance and HEX validity
+PASS H concurrent completions: one dispatch owner
+PASS Capture failure never clears/rearms
+PASS Out-of-order frame and configuration token discarded
+PASS Optional interval consumes suppressed appearance without queue
+PASS Output keyboard/mouse down-up pair construction
+PASS Settings persistence includes engine and normalized point
+PASS Hardware D3D11 shader initialization
+PASS G actual GPU exact/near/wrong RGB: endpoints and 256 random colours
+PASS GPU pending result: Hold released before completion
+PASS Live desktop duplication -> HLSL -> F24 receiver, continuous highlight
+PASS Live genuine clear/reappearance outputs exactly twice
+PASS Live Hold release with target visible: no late output
+PASS Live input/capture latency: 30 controlled new appearances
+PASS Live original cursor mode uses the same single-trigger engine
+PASS Live capture acquisition and detection-to-SendInput benchmark
+Passed: 22 Failed: 0

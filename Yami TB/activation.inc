@@ -1,5 +1,9 @@
+#ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
 #define NOMINMAX
+#endif
 
 #include <windows.h>
 #include <windowsx.h>
@@ -22,6 +26,8 @@
 #include <emmintrin.h>
 #include <intrin.h>
 #include <Xinput.h>
+#include "engine_options.h"
+constexpr ULONG_PTR YAMI_OUTPUT_TAG=0x59414D49;
 
 static inline unsigned FindFirstSetBit(unsigned mask)
 {
@@ -183,7 +189,8 @@ extern std::atomic<int> g_captureBlockVK;
 void UpdateActivationActive();
 std::atomic<bool> g_primaryKeyDown{ false };
 std::atomic<bool> g_holdKeyDown{ false };
-std::atomic<bool> g_toggleState{ false };
+// Master permission. Monitoring still requires a physical Hold binding.
+std::atomic<bool> g_toggleState{ true };
 
 void HandleControllerButtonEvent(int controllerIndex, int buttonIndex, bool down)
 {
@@ -424,12 +431,17 @@ HANDLE g_activationWakeEvent = nullptr;
 
 void UpdateActivationActive()
 {
+    static std::mutex transitionMutex;
+    std::lock_guard transition(transitionMutex);
     const bool active =
-        g_toggleState.load(std::memory_order_acquire) ||
-        g_holdKeyDown.load(std::memory_order_acquire);
+        g_toggleState.load(std::memory_order_acquire) &&
+        g_holdKeyDown.load(std::memory_order_acquire) &&
+        !g_activationCapture.load(std::memory_order_acquire) &&
+        !g_engineSuspended.load(std::memory_order_acquire);
 
     const bool previous =
         g_activationActive.exchange(active, std::memory_order_acq_rel);
+    if(previous!=active)SetEngineActive(active);
 
     // Wake the scanner immediately when activation changes.  This is only
     // used for the inactive/active transition; the active detector remains
@@ -440,11 +452,12 @@ void UpdateActivationActive()
 
 void BeginActivationCapture(ActivationCaptureTarget target)
 {
+    g_activationCapture.store(true, std::memory_order_release);
     g_activationCaptureTarget.store(target, std::memory_order_release);
 
     g_activationActive.store(false, std::memory_order_release);
     if (g_activationWakeEvent) SetEvent(g_activationWakeEvent);
-    g_toggleState.store(false, std::memory_order_release);
+    SetEngineActive(false);
     g_primaryKeyDown.store(false, std::memory_order_release);
     g_holdKeyDown.store(false, std::memory_order_release);
 
@@ -489,7 +502,7 @@ void CompleteBindCapture(int vk)
     {
         g_activationVK.store(vk, std::memory_order_release);
         g_primaryKeyDown.store(false, std::memory_order_release);
-        g_toggleState.store(false, std::memory_order_release);
+        SetEngineActive(false);
     }
     else if (target == ActivationCaptureTarget::Hold)
     {
@@ -505,6 +518,7 @@ void CompleteBindCapture(int vk)
     g_activationCaptureArmed.store(false, std::memory_order_release);
     g_captureWaitingForRelease.store(false, std::memory_order_release);
     g_activationActive.store(false, std::memory_order_release);
+    SetEngineActive(false);
 
     if (g_hwnd)
     {
@@ -630,6 +644,8 @@ void HandleRawActivationInput(HRAWINPUT hRawInput)
 
     const RAWINPUT* raw =
         reinterpret_cast<const RAWINPUT*>(data);
+    if((raw->header.dwType==RIM_TYPEKEYBOARD&&raw->data.keyboard.ExtraInformation==YAMI_OUTPUT_TAG)||
+       (raw->header.dwType==RIM_TYPEMOUSE&&raw->data.mouse.ulExtraInformation==YAMI_OUTPUT_TAG))return;
 
     int vk = 0;
     bool down = false;
