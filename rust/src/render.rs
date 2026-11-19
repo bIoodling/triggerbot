@@ -63,7 +63,7 @@ pub const SECOND: u32 = 0xff17171b;
 pub const BORDER: u32 = 0xff303036;
 pub const TEXT: u32 = 0xfff5f5f5;
 pub const DIM: u32 = 0xff92929b;
-pub const RED: u32 = 0xffc42b3e;
+pub const RED: u32 = 0xff7848e8;
 pub unsafe fn startup() -> usize {
     let mut t = 0;
     GdiplusStartup(
