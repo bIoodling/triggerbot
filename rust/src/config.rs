@@ -27,14 +27,14 @@ impl Default for Config {
             toggle: 0,
             hold: 0,
             output: 0,
-            rgb: 0x00ff00,
+            rgb: 0xffffff,
             fixed: false,
             calibrated: false,
             x: 0.5,
             y: 0.5,
             target_exe: String::new(),
             radius: 12,
-            tolerance: 2,
+            tolerance: 14,
             clear_ms: 8,
             clear_frames: 2,
         }
@@ -52,7 +52,7 @@ pub fn load() -> Config {
         .unwrap_or_else(migrate);
     c.rgb &= 0xffffff;
     c.radius = c.radius.clamp(1, 128);
-    c.tolerance = c.tolerance.min(16);
+    c.tolerance = c.tolerance.clamp(8, 48);
     c.clear_ms = c.clear_ms.min(100);
     c.clear_frames = c.clear_frames.clamp(2, 16);
     if !c.x.is_finite() || !c.y.is_finite() {
