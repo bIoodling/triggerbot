@@ -8,3 +8,4 @@
 *.ilk
 *.log
 artifacts/
+rust/target/
