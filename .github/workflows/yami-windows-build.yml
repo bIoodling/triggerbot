@@ -26,8 +26,7 @@ jobs:
       - name: Upload Windows executables
         uses: actions/upload-artifact@v4
         with:
-          name: Yami-v1.0.6-windows-source-review
+          name: Yami-v1.0.6-single-installer
           path: |
-            rust/target/release/Yami.exe
             rust/target/release/Yami-Setup.exe
           if-no-files-found: error
