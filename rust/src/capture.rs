@@ -40,12 +40,16 @@ pub fn point(cfg: &Config, hint: usize) -> Option<((i32, i32), isize)> {
                 return None;
             }
             let mut r: RECT = std::mem::zeroed();
-            GetClientRect(window, &mut r);
+            if GetClientRect(window, &mut r) == 0 {
+                return None;
+            }
             if r.right <= 0 || r.bottom <= 0 {
                 return None;
             }
             let mut origin = POINT { x: 0, y: 0 };
-            ClientToScreen(window, &mut origin);
+            if ClientToScreen(window, &mut origin) == 0 {
+                return None;
+            }
             POINT {
                 x: origin.x + ((cfg.x * r.right as f64).round() as i32).clamp(0, r.right - 1),
                 y: origin.y + ((cfg.y * r.bottom as f64).round() as i32).clamp(0, r.bottom - 1),

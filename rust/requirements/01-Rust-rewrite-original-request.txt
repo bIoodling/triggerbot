@@ -1,0 +1,509 @@
+# Yami v1.0.6 — Complete Rust Rewrite, Minimalist UI and Installer
+
+You are an experienced Rust developer specialising in Windows desktop applications, Direct3D 11, GPU-accelerated screen capture, low-latency input processing, and professional interface design.
+
+Your task is to rebuild **Yami v1.0.6** as a polished, lightweight, standalone Windows application using Rust.
+
+I have attached:
+
+- The **approved red-and-black UI reference image**.
+- The existing Yami application project.
+- The original AutoHotkey script, `triggerbot GREEN.ahk`.
+
+**The attached reference image is the definitive visual specification. Reproduce it as accurately as possible.**
+
+This must be a functional application, not a prototype, mockup, demonstration, or separate testing utility.
+
+Do not introduce features, interface elements, or visual effects that I have not requested.
+
+## 1. Interface — Exact Reference Implementation
+
+Reproduce all five interface states shown in the attached image:
+
+1. Main Window.
+2. Settings Window.
+3. Colour Picker.
+4. Installer v1.0.6.
+5. Existing Installation Replacement Dialog.
+
+### Visual design
+
+Use the following design system:
+
+- Main background: near-black `#09090B`.
+- Window surfaces: dark charcoal `#101013`.
+- Secondary surfaces: `#17171B`.
+- Borders: subtle dark grey `#303036`.
+- Primary text: soft white `#F5F5F5`.
+- Secondary text: muted grey `#92929B`.
+- Primary accent: dark crimson red `#C42B3E`.
+- Hover accent: `#D73549`.
+- Disabled controls: neutral charcoal.
+
+**Do not use purple anywhere in the application.**
+
+Avoid:
+- Neon effects.
+- Glowing text.
+- Red text outlines.
+- Unnecessary gradients.
+- Decorative icons.
+- Excessive shadows.
+- Oversized buttons.
+- Excessively rounded corners.
+- Large empty spaces.
+- Gaming-style typography.
+- Unnecessary animations.
+
+The interface must look like a professionally designed minimalist Windows utility.
+
+### Main window
+
+The main window must be extremely compact.
+
+It must contain ONLY:
+
+- Yami application title.
+- Minimise and close controls.
+- Small status indicator.
+- Target colour label.
+- Selected colour swatch.
+- Current HEX value.
+- Settings gear in the bottom-left corner.
+
+Status values:
+- Ready.
+- Active.
+- Disabled.
+
+Use a small green indicator for Ready, red for Active, and muted grey for Disabled.
+
+Do not add a large enable/disable switch.
+
+Do not display keybindings on the main window.
+
+Do not display Fixed Point controls on the main window.
+
+Do not add Start with Windows, Save, performance statistics, or unnecessary descriptions.
+
+### Window dimensions
+
+Keep the window approximately the same proportions as the reference.
+
+The actual application should be significantly smaller than the previous version.
+
+Use DPI-aware rendering.
+
+The interface must remain crisp at:
+- 100% scaling.
+- 125% scaling.
+- 150% scaling.
+- 200% scaling.
+
+Do not allow clipping, overlapping elements, unexpected scrollbars, or broken alignment.
+
+## 2. Settings — Typography and Visual Hierarchy
+
+Clicking the gear icon opens the Settings Window shown in the reference.
+
+Preserve the exact layout and compact proportions.
+
+Include:
+- Back navigation.
+- Keybinds heading.
+- Toggle binding.
+- Hold binding.
+- Trigger/output binding.
+- `Press Esc to unbind a key` hint.
+- Fixed Point mode toggle.
+
+### Typography
+
+The previous UI lacked sufficient visual hierarchy because headings and ordinary labels looked identical.
+
+Correct this without adding visual clutter.
+
+Use:
+
+**Application title — Yami**
+- Semibold, 600.
+- Slightly larger than ordinary text.
+- Soft white.
+
+**Section heading — Keybinds**
+- Semibold, 600.
+- Slightly more prominent than the keybinding labels.
+- Maintain the reference's compact sizing.
+- Do not use coloured text or glow.
+
+**Toggle, Hold, Trigger**
+- Medium, 500.
+- White or slightly off-white.
+- Clearly distinguishable from secondary information.
+
+**Keybinding values**
+- Regular, 400.
+- Centred within the existing rounded controls.
+- Use `Not set` when unassigned.
+
+**Instruction text**
+- `Press Esc to unbind a key`.
+- Small font.
+- Muted grey.
+- Regular, 400.
+
+**Fixed Point**
+- Medium, 500.
+- Match the prominence of the keybinding labels.
+
+Maintain consistent spacing and alignment.
+
+Do not make every label bold.
+
+### Keybinding functionality
+
+All three bindings must be editable.
+
+When clicking a binding:
+1. Enter key-capture mode.
+2. Display `Press a key...`.
+3. Capture the next supported keyboard or mouse input.
+4. Display the assigned key using a human-readable name.
+5. Save the binding.
+
+Pressing Escape while capturing must clear the binding.
+
+Unassigned bindings must display `Not set`.
+
+Never display raw virtual-key identifiers such as `VK_DB`.
+
+Do not activate application functions while a binding is being captured.
+
+Persist all bindings between sessions.
+
+## 3. Colour Picker
+
+Implement the colour picker shown in the reference image.
+
+It must contain:
+
+- Circular hue wheel.
+- Saturation and brightness square.
+- HEX input field.
+- Colour preview.
+- Eyedropper button.
+- Red Apply button.
+- Close control.
+
+Default colour: `#00FF00`.
+
+Support all valid RGB HEX colours.
+
+Synchronise the hue wheel, saturation square, HEX field, and colour preview.
+
+Validate HEX input correctly.
+
+Clicking Apply must update the actual detection colour immediately.
+
+The colour picker must not be a decorative interface.
+
+The selected colour must persist between sessions.
+
+The colour picker should use the application's near-black and charcoal styling, with red used only for application controls. The hue wheel must retain its full colour spectrum.
+
+## 4. Rust Application Architecture
+
+Rewrite the application in Rust.
+
+Use a lightweight, maintainable native Windows architecture.
+
+Choose a suitable GUI framework capable of closely reproducing the reference design.
+
+Prefer native performance and minimal runtime dependencies.
+
+Separate the project into clearly defined modules:
+
+- UI rendering.
+- Configuration management.
+- Screen capture.
+- GPU processing.
+- Colour matching.
+- Keyboard and mouse input.
+- Trigger state management.
+- System tray.
+- Installation and updating.
+
+Avoid unnecessary background services.
+
+Avoid excessive dependencies.
+
+Do not install the Rust compiler or Cargo on users' computers.
+
+The finished application must run independently of a Rust development environment.
+
+## 5. Detection Engine — Reliability and Low Latency
+
+Inspect the attached original AutoHotkey script to understand the intended behaviour.
+
+The original script uses:
+
+- A 12-pixel detection radius.
+- Approximately 5 ms between scans.
+- Green-dominance detection.
+- Hold-key activation.
+- A 120 ms rearm delay.
+- Mouse-click output.
+
+The previous implementations suffered from inconsistent detection and repeated input events.
+
+Do not reproduce those defects.
+
+### Detection requirements
+
+Implement an efficient native colour-detection pipeline.
+
+Use GPU acceleration where appropriate.
+
+Support configurable HEX colour tolerance.
+
+The system must correctly distinguish the selected colour from unrelated colours.
+
+Use a strict event-driven state machine:
+
+`IDLE → ARMED → FIRED → WAITING_FOR_CLEAR → ARMED`
+
+Behaviour:
+
+- Holding the configured key enables monitoring.
+- Detecting the target colour sends one configured output.
+- Continuous colour presence must not cause duplicate outputs.
+- A confirmed disappearance followed by reappearance allows another output.
+- Releasing Hold immediately disarms monitoring.
+- Disabling the application clears pending events.
+- Changing bindings or detection mode resets the state safely.
+
+### Duplicate-trigger prevention
+
+Do not rely solely on a large fixed cooldown.
+
+Use detection-state transitions to prevent repeated output.
+
+The same continuous highlight must produce only one trigger event.
+
+A genuinely new highlight may produce another event after the previous detection has cleared.
+
+Use a small configurable clear-state debounce to avoid false rearming caused by brief capture glitches.
+
+Prevent multiple processing threads from dispatching the same event.
+
+### Performance
+
+Optimise for low latency.
+
+Use:
+- Efficient Direct3D 11 capture where appropriate.
+- Reusable GPU resources.
+- Small detection regions.
+- Minimal CPU/GPU synchronisation.
+- High-resolution monotonic timing.
+- Efficient input dispatch.
+
+Avoid:
+- Full-screen CPU pixel scanning.
+- Per-frame allocations.
+- UI processing in the detection loop.
+- Unnecessary blocking operations.
+- Duplicate capture loops.
+
+Do not claim guaranteed sub-1ms end-to-end latency or perfect parries.
+
+Prioritise reliable detection and accurate event handling over unrealistic performance claims.
+
+## 6. Fixed Point Mode
+
+Keep the feature name exactly:
+
+**Fixed Point**
+
+Do not call it Cursorless TB.
+
+When disabled:
+- Use cursor-centred detection.
+- Preserve the original cursor-based workflow.
+
+When enabled:
+- Use a calibrated screen-space detection point.
+- Do not require the cursor to remain over the target.
+- Do not move the user's cursor.
+
+Store the detection point using normalised viewport coordinates.
+
+Support:
+- 1440 × 1080 stretched resolution.
+- 1920 × 1080.
+- 2560 × 1440.
+- 3840 × 2160.
+- Different aspect ratios.
+- Windowed and fullscreen applications where supported.
+- Different Windows display scaling configurations.
+
+Provide a minimal calibration control inside Settings when Fixed Point is enabled.
+
+During calibration, allow the user to select the desired detection point.
+
+Remove calibration markers when calibration is complete.
+
+Do not add a permanent gameplay overlay.
+
+## 7. Installer — Yami v1.0.6
+
+Create a professional standalone Windows installer.
+
+The installer must reproduce the attached red-and-black reference.
+
+Display:
+
+`Yami v1.0.6`
+
+Use:
+- Near-black window.
+- Charcoal surfaces.
+- Thin grey borders.
+- Red progress bar.
+- Red-accented controls.
+- Clean white typography.
+
+### Installation requirements
+
+The installer must:
+
+1. Check for an existing installation.
+2. Display a replacement confirmation if Yami is already installed.
+3. Install the application to `%LOCALAPPDATA%\Yami`.
+4. Bundle only required runtime dependencies.
+5. Avoid installing Rust, Cargo, or unnecessary development tools.
+6. Verify application files.
+7. Register the application in Windows Installed Apps.
+8. Create an uninstaller.
+9. Launch Yami when installation completes.
+
+The installed application must run directly without launching the installer again.
+
+The installer must remain a separate distributable executable.
+
+Do not attempt to overwrite the running installer executable.
+
+### Administrator permissions
+
+Use standard Windows UAC only if elevation is genuinely required.
+
+A per-user LocalAppData installation should not request administrator permissions unnecessarily.
+
+The normal Yami executable must not require administrator privileges for ordinary operation.
+
+Do not implement process hiding, security-tool evasion, or stealth persistence.
+
+## 8. Reinstallation and Replacement
+
+If Yami is already installed, display the confirmation dialog shown in the reference.
+
+Title:
+
+`Replace existing installation?`
+
+Explain that the current application files will be replaced.
+
+Buttons:
+- Cancel.
+- Replace.
+
+Use the same dark charcoal and restrained red styling.
+
+Do not automatically delete user settings.
+
+Preserve existing configuration by default.
+
+Replace only files belonging to Yami.
+
+Never recursively delete unrelated directories.
+
+Handle failed installations safely.
+
+Avoid leaving incomplete application files behind.
+
+## 9. System Tray
+
+Preserve Windows system-tray functionality.
+
+When minimised:
+- Hide the main application window.
+- Remove the window from the taskbar.
+- Keep the application accessible through the notification-area icon.
+
+Tray menu:
+- Open.
+- Exit.
+
+Double-clicking the tray icon should restore the application.
+
+Ensure the tray icon is removed during shutdown.
+
+Do not hide the process from Task Manager or Windows security software.
+
+## 10. Build and Delivery
+
+I will manually run and test the finished application.
+
+Do not create:
+- A separate triggerbot tester.
+- Gameplay testing tools.
+- Unnecessary debug interfaces.
+- Lengthy benchmark suites.
+- Additional demonstration applications.
+
+Do not spend time performing gameplay tests.
+
+However, perform a quick compilation check, static error review, and dependency verification.
+
+Fix obvious build errors before delivery.
+
+### Required deliverables
+
+Provide:
+
+1. Complete Rust source project.
+2. Compiled release executable.
+3. Yami v1.0.6 installer executable.
+4. Required runtime dependencies.
+5. ZIP containing the source and distributable files.
+6. Brief changelog.
+
+If compilation is unavailable, state this explicitly.
+
+Do not claim to have produced a working executable if it was not successfully built.
+
+## 11. Final Requirements
+
+The finished application must:
+
+- Match the attached red-and-black reference image.
+- Contain no purple accents.
+- Have a compact, minimal main window.
+- Use clear typography hierarchy in Settings.
+- Support functional keybinding controls.
+- Support a fully functional colour picker.
+- Preserve settings between sessions.
+- Implement the specified colour-detection state machine.
+- Prevent duplicate trigger events.
+- Support cursor-based and Fixed Point detection.
+- Use a lightweight Rust architecture.
+- Include a standalone installer.
+- Support safe reinstallation.
+- Preserve system-tray functionality.
+- Run without requiring users to install Rust.
+
+**Final priorities: Pixel-accurate minimalist red-and-black UI, reliable detection, no duplicate triggering, lightweight standalone Rust distribution, and a polished Yami v1.0.6 installer.**
+
+Do not redesign the approved interface or introduce unnecessary features.
+
+Implement the requested application, perform a quick build verification, and deliver the completed project for manual testing.

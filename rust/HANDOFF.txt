@@ -1,0 +1,339 @@
+LATEST UPDATE — 2026-11-19: PURPLE REPAIR CANDIDATE
+
+Read ENGINE-REPAIR-2026-11-19.md and README.md first. This revision changes the UI to the newest purple palette and fixed 400x420 dimensions; it repairs unchanged-DXGI-frame rearming and includes a red X calibration marker and balanced cursor cleanup. It adds configurable radius/tolerance, stale physical-point validation, old-instance warnings and session diagnostics. App and installer compile, and 3 noninteractive latch checks pass. This revision has NOT been launched, visually checked, installed or verified inside Roblox. The user still reports failure of the prior build; the exact cause in Roblox remains unknown. No claim of gameplay success is warranted. requirements/03-Purple-engine-calibration-request.txt is the newest supplied text and ends abruptly at Window positioning / Fix. Older red screenshots and findings below are historical.
+
+--- HISTORICAL HANDOFF FOLLOWS ---
+
+YAMI v1.0.6 — SOURCE HANDOFF / UNRESOLVED ENGINE REPAIR
+Prepared 19 November 2026
+
+READ THIS FIRST
+==============
+The user reports that the triggerbot STILL DOES NOT WORK, including after the
+latest repair build. Treat the project as unfinished. Do not describe it as a
+working triggerbot merely because it builds, shows Ready, or passes the limited
+checks described below. The immediate priority is real, reliable detection and
+one correct output per genuine event in both Cursor and Fixed Point modes.
+
+This ZIP contains the current Rust source, not a compiled application or Cargo
+toolchain. No Discord messages have been sent on the user's behalf.
+
+The user will manually operate and check the program. Do not control their
+desktop, open applications/windows, launch installers, or perform gameplay tests
+without a new explicit instruction. The previous desktop inspection was stopped
+by the user. Source review and build verification were requested. The user also
+explicitly requires proof of the complete detection-to-input path before a
+future agent claims the engine works. Reconcile that by using source/build and
+appropriate controlled checks, and by clearly leaving actual game/UI claims
+unverified until the user manually confirms them. Do not create another separate
+triggerbot tester, demonstration app, debug panel, or lengthy benchmark suite.
+
+CONTENTS / WHERE TO START
+========================
+Cargo.toml, Cargo.lock        Rust package, pinned dependencies, v1.0.6.
+.cargo/config.toml           Static C runtime for x64 MSVC.
+build.rs, assets/app.rc      Windows resources, version and asInvoker manifest.
+src/main.rs                  Portable Yami.exe entry point.
+src/bin/setup.rs             Separate Yami-Setup.exe; embeds the built app.
+src/ui.rs                    Win32 UI, raw input routing, dialogs, screen picking.
+src/render.rs                GDI+ renderer and approved theme constants.
+src/windowing.rs             Work-area placement and launch fade.
+src/calibration.rs           Tiny per-pixel-alpha marker / colour preview.
+src/config.rs                JSON defaults, validation, atomic save, old INI import.
+src/capture.rs               Physical screen / client viewport coordinates.
+src/gpu.rs                   DXGI duplication, D3D11 ROI compute, pixel readback.
+assets/ColorDetect.hlsl      Circular ROI matching with per-channel RGB tolerance.
+src/input.rs                 Key names, shared edges, SendInput pairs, cleanup.
+src/trigger.rs               Activation, capture owner, state / output owner.
+src/tray.rs                  Notification icon and Open/Exit menu.
+src/install.rs               Per-user install, replacement, verification, uninstall.
+src/verification.rs          Opt-in cfg(test) integration checks, not a shipped app.
+REPAIR-NOTES.md              Latest implementation notes and verification limits.
+requirements/               Original available user-supplied request documents.
+reference/approved-ui.png    Latest red-and-black reference, if still available.
+
+HISTORY — WHAT WAS DONE
+=======================
+1. The user originally supplied Yami TB.exe, then a Yami TB.rar source archive,
+   and authorized work in https://github.com/bIoodling/triggerbot (public).
+   The repository was initially empty. The archive included C++ source and VS
+   build artifacts. Source was imported; caches, binaries and private build
+   databases were not needed for the source distribution.
+
+2. The first request was a purple/black UI redesign without changing the engine.
+   That older design is now SUPERSEDED by the red/black reference. The C++ source
+   actually implemented DXGI capture plus CPU scanning, despite comments and
+   earlier EXE strings referring to GPU shaders. No HLSL files were in that
+   archive. Do not assume the EXE and archived source were equivalent.
+
+3. A C++ engine rework added a GPU ROI shader, single-output state machine and
+   cursorless calibration. A C++ version called 1.1 exists in repository history.
+   Its controlled tests/latencies DO NOT validate this Rust rewrite. The original
+   500 ms rearm rule and the reported roughly 15 ms duplicates were discussed;
+   the specific historical duplicate incident was never established from a trace.
+
+4. The user then requested a COMPLETE RUST rewrite called v1.0.6, a much smaller
+   red/black UI, Fixed Point naming, and a separate installer. That is this ZIP.
+   It uses Rust with Win32/GDI+, windows/windows-sys bindings, serde/serde_json,
+   sha2 and a build-only resource compiler dependency. No C++ engine DLL or
+   AutoHotkey runtime is used. Both EXEs compiled; imports were Windows system
+   DLLs. The initial rewrite was not runtime-tested, per the user's instructions.
+
+5. Further requested fixes: topmost windows, correct centring, a non-draggable
+   installer, launch fade, fresh WHITE defaults, stable calibration, and an exit
+   confirmation. The user then added critical engine repair and a whole-GUI-hidden
+   eyedropper. These changes are implemented in the current source, but the user
+   still reports that the triggerbot is not working. They require continued work.
+
+6. Primary-source research compared Microsoft DXGI/D3D11/Raw Input/SendInput docs
+   with RustDesk's DXGI capture and windows-capture's D3D11 implementation.
+   Research links are included below. Research alone was not treated as proof.
+
+CONFIRMED FINDINGS / IMPLEMENTED REPAIRS
+======================================
+- The old Rust activation path required BOTH a Raw Input-maintained Hold flag
+  and GetAsyncKeyState's current down state. A controlled test reproduced zero
+  outputs in both modes when Windows reported Hold down but that raw flag was
+  absent. A GPU-only test matched a real desktop pixel, so that reproduction
+  localized a real blocker to activation rather than proving the shader broken.
+- Current code uses one shared key-edge handler for Raw Input and asynchronous
+  fallback. It includes release/configuration guards, suppression during capture
+  and dialogs, and a release-before-reactivation guard after edits.
+- Ordinary Settings interactions could leave processing suspended. Suspension
+  was restricted to actual editing/capture/picker/modal/picking interactions.
+  Minimise/navigation should not leave a permanent disabled latch. Audit this.
+- Capture/initialization errors used to be silently discarded. Current code
+  records error transitions to engine.log and uses Disabled rather than falsely
+  implying initialization succeeded. GPU resources initialize in the worker.
+- The previous fullscreen calibration overlay filled its colour-key background,
+  then Canvas::new cleared the whole graphics surface to OPAQUE near-black.
+  Mouse movement invalidated that fullscreen surface. That was a concrete black-
+  flash-producing code path. The replacement is a small persistent alpha marker;
+  no fullscreen Canvas clear or fullscreen invalidation remains in that path.
+  This was source-inspected, NOT visually verified as flicker-free on the user's PC.
+- Screen picking now hides the entire main/settings surface and colour popup.
+  Temporary mouse/Escape callbacks are installed only for selection and cleaned
+  up on completion/cancel. The eyedropper uses the existing worker's DXGI pixel
+  readback, not a second duplicator. Preview is offset from the sampled pixel.
+- RGB tolerance was already present in the shader; the repaired Settings UI
+  exposes it in the spare space beside the unbind hint. Both modes share it.
+
+VERIFICATION — EXACT SCOPE, NOT A SUCCESS GUARANTEE
+=================================================
+The current app and rebuilt installer compiled successfully. Before the user
+stopped desktop interaction, opt-in library checks used real Windows desktop
+duplication, actual GPU matching and SendInput to a controlled receiving window.
+
+Before the activation repair:
+  Cursor mode received 0 key-downs / 0 key-ups.
+  Fixed Point mode received 0 initial events / 0 total events.
+
+After repair, the final controlled check reported:
+  Cursor mode: 1 down / 1 up for a continuous appearance.
+  Fixed Point: 1 initial event; 3 total first qualified appearances.
+  Immediately after Hold release: still 3 events.
+  8 paired output events in total across the expanded scenarios.
+  Tolerance boundary, Toggle off/on, Hold release, red/green/blue/white,
+  alternating modes and DXGI eyedropper sampling passed.
+  Two opt-in library test functions passed in approximately 3.4 seconds.
+
+Those checks emulate Hold and deliver output to a standard Win32 receiver. They
+DO NOT prove Roblox accepts or acts on that input, or that the user's particular
+game highlight/viewport/keyboard/device behaves correctly. They DO NOT prove the
+global screen-selection hooks, hide/restore, animations, installer, exit dialog,
+topmost behaviour, DPI changes or actual game calibration work on the user's PC.
+No gameplay tests or guaranteed performance/parry claims were made.
+
+The user stopped Computer Use with physical Escape and explicitly said not to
+use their computer or open apps/files/windows. Do not restart desktop automation
+just because a previous agent attempted it. The latest delivery was a repair ZIP;
+the user's subsequent feedback remains: THE TRIGGERBOT STILL IS NOT WORKING.
+
+CURRENT REQUIREMENTS — ENGINE (HIGHEST PRIORITY)
+===============================================
+Trace every stage with evidence:
+  screen capture -> current pixels -> physical ROI coordinates -> RGB/HEX/tolerance
+  -> detection transition -> Hold/Toggle state -> configured output -> received input.
+
+Find the remaining actual failure instead of speculatively rewriting working code.
+Verify selected HEX/tolerance reach the shader and updates are not stale. Validate
+current frame acquisition, monitor/rotation/DPI coordinates and matching. Verify
+actual Hold/Toggle recognition, master permission and transient suspension flags.
+Verify that Trigger output is correctly sequenced and accepted by Windows. Check
+return values. Standard SendInput can be blocked by Windows integrity rules or
+ignored by a target; do not claim these conditions are bypassed or repaired.
+Do not add process hiding, code injection, anti-cheat/security evasion or a forced
+administrator requirement as a substitute for understanding the problem.
+
+Use ONE capture/output processing owner, reused GPU resources and small regions.
+Avoid full-screen CPU scans, per-frame heap allocations, UI work in the hot path,
+unnecessary sleeps, multiple output queues or independent output dispatchers.
+Maintain low measurable latency; do not advertise guaranteed sub-1 ms end-to-end.
+
+Required logical states:
+  IDLE -> ARMED -> FIRED -> WAITING_FOR_CLEAR -> ARMED.
+Hold enables monitoring only while down. Detect one eligible appearance, emit
+one configured down/up output, and disarm. Continuous highlight: exactly one.
+Brief unstable/missed frame: no false rearm. Confirmed disappearance/reappearance:
+new eligible event. Release Hold, disable, rebind or change mode: invalidate stale
+results and clear pending work. Capture failure is not evidence of clear.
+Use a narrow configurable per-channel tolerance; avoid broad green-dominance
+false positives. Support all valid #RRGGBB colours, not just #00FF00.
+
+Original AHK behaviour was DESCRIBED as radius 12, roughly 5 ms scanning,
+green dominance, Hold activation, 120 ms rearm, mouse click output. The actual
+triggerbot GREEN.ahk file was NOT available to inspect. Do not claim it was.
+The new design should use state transitions, not that large cooldown alone.
+
+CURRENT REQUIREMENTS — FIXED POINT / EYEDROPPER
+=============================================
+Feature name must be Fixed Point (not Cursorless TB).
+Off: use the current mouse position and a small circular region.
+On: use a calibrated point in the intended client viewport, independent of cursor.
+Both modes must use the SAME matching, state and output engine. Switching modes
+must not leave processing disabled or stuck. Never move the user's mouse.
+
+Persist normalized x = selectedX/clientWidth, y = selectedY/clientHeight. Resolve
+against actual physical client position/size, not an assumed full monitor. Support
+1440x1080 stretched, 1920x1080, 2560x1440, 3840x2160, other aspect ratios, windowed
+and fullscreen where supported, and 100/125/150/200% Windows scaling. No universal
+point is guaranteed across camera zoom; allow recalibration. Referenced Blade Ball
+camera screenshots and OBS recording were not actually available in this source.
+
+Calibrate: hide ALL Yami GUI, show only a lightweight temporary marker, move freely,
+left-click selects, Escape cancels, save normalized point, restore Settings.
+No black flashes, repeated fullscreen creation, display-mode switches, permanent
+overlay, invisible interceptors or resource leaks. Focus/display interruption
+must cancel safely. Keep calibration independent from normal detection output.
+
+Eyedropper: hide ALL Yami GUI/popups, preview colour beside cursor without covering
+the sampled pixel, read the actual displayed pixel, left-click selects and Escape
+cancels. Restore Yami; synchronize HEX, swatch and wheel; persist and apply the
+selected colour to the actual engine. Never sample Yami's own interface.
+
+CURRENT REQUIREMENTS — APPROVED UI (DO NOT REDESIGN)
+=================================================
+Use reference/approved-ui.png if present. All five states matter: compact main,
+Settings, colour picker, installer, replacement dialog. Later additions are only
+the requested exit confirmation and minimal calibration/tolerance controls.
+
+Palette:
+  background #09090B; surfaces #101013; secondary #17171B; border #303036;
+  primary text #F5F5F5; secondary #92929B; accent #C42B3E; hover #D73549.
+No purple application accents. The hue wheel naturally retains its full spectrum.
+No neon/glow, unnecessary gradients/animations, decorative logos, developer credits,
+oversized controls, debug panels, clutter or gaming typography.
+
+Main: title Yami, minimise/X, small status, target-colour label, swatch, HEX and
+bottom-left settings gear ONLY. No keybind list, Fixed Point, large enable switch,
+Start with Windows, Save or performance stats. Preserve compact approved geometry.
+Ready indicator green; Active red; Disabled grey. Ready must reflect initialization.
+
+Settings: Back, Keybinds heading, Toggle/Hold/Trigger buttons, exact hint
+"Press Esc to unbind a key", Fixed Point and minimal calibration when enabled.
+Title/headings semibold; ordinary labels medium; values regular and centered;
+hint small muted regular. Do not make every label bold.
+
+Bindings: all editable, "Press a key...", supported keyboard/mouse, Escape clears,
+outside-click cancels, "Not set" when unassigned. Human names (Mouse 4/5, Left
+Shift, Right Ctrl, F, etc.), never VK_DB/raw IDs. Do not activate while capturing.
+Save all edits and preserve them on relaunch. Unassigned keys must never activate.
+
+Picker: full hue ring, saturation/value square, validated HEX, live preview,
+eyedropper, red Apply and close control. Selected RGB must reach the real engine.
+
+Fresh defaults with NO existing configuration: Toggle/Hold/Trigger Not set,
+target #FFFFFF, Fixed Point off, Ready after initialization. Never auto-assign
+E/F/R. Preserve existing JSON and legacy values on normal updates. Existing old
+settings explain why a user can legitimately retain E/F/green; that is not fresh.
+
+Window management: main AND installer native always-on-top above ordinary apps;
+owned Settings/picker/dialogs remain correctly associated. No background focus-
+stealing/reposition loops, UAC interference or secure-desktop tricks.
+Fresh process: calculate final DPI-aware dimensions, then centre on active monitor
+work area accounting for taskbar, BEFORE showing. No stale saved position or jump.
+Main stays draggable and not resizable. Installer neither draggable nor resizable.
+Replacement/exit confirmations remain centred appropriately above their parent.
+
+Opening animation: 180-220 ms, transparent to opaque, time-based ease-out. A subtle
+scale is optional and not implemented; avoid native resize jitter. No bounce,
+blur, glow or excessive motion. Respect Windows reduced-motion preferences.
+Do not animate every interaction.
+
+Main X: compact "Close Yami?" / "Are you sure you want to exit?", Cancel / Exit,
+red-black styling, owner-centred, no duplicate dialogs, keyboard navigation,
+Escape cancels and no keybind activation during confirmation. Exit stops processing,
+cleans synthetic input if necessary, saves settings and removes the tray icon.
+Minimise hides to tray with no exit prompt. Tray Exit uses clean shutdown too.
+
+CURRENT REQUIREMENTS — INSTALLER / DISTRIBUTION
+=============================================
+Keep separate Yami.exe and Yami-Setup.exe, version/name Yami v1.0.6. Do not install
+Rust/Cargo/development tools on end-user machines. No unnecessary runtime services
+or dependencies. A normal per-user install must not require administrator access.
+
+Install to %LOCALAPPDATA%\Yami. Detect an existing installation and show the
+approved "Replace existing installation?" explanation with Cancel / Replace.
+Preserve user settings. Replace ONLY owned files, verify them, recover safely
+from failed installation, and never recursively delete unrelated directories.
+Register Installed Apps, create a working uninstaller, and launch the installed
+application on success. Never overwrite a currently running installer executable.
+The current uninstaller can leave a temporary helper in Windows Temp; document
+or improve cleanup safely, without adding stealth persistence.
+
+Keep layout; centre installer correctly; progress must be accurate, smooth and
+nondecreasing within one install; buttons responsive; no UI freezes or unwanted
+movement. Close cleanly when done. Preserve the per-user architecture.
+
+Tray: minimise hides window/taskbar entry; keep a proper notification-area icon;
+Open and Exit menu, double-click restores, remove icon on shutdown. Keep process
+visible in Task Manager/security software. Earlier requested process hiding was
+not implemented; the user accepted the normal product/executable name Yami.
+
+BUILD / DELIVERABLES / NEXT STEPS
+===============================
+Developer environment: Rust x64 MSVC, Visual C++ Build Tools and Windows SDK.
+End users need only the Windows OS components and compatible D3D11 GPU.
+Run build.ps1 in this source directory, or build IN THIS ORDER:
+  cargo build --locked --release --bin Yami
+  cargo build --locked --release --features installer --bin Yami-Setup
+Setup embeds target/release/Yami.exe, so rebuilding only Setup with a stale app
+will package the wrong payload. Run Cargo from this directory so .cargo/config
+and static-CRT flags are applied. Verify OS-only DLL dependencies on release files.
+
+If explicitly authorized for interactive controlled checks:
+  cargo test --lib -- --ignored --nocapture --test-threads=1
+These checks create a temporary receiver and emit test input. Do NOT run them
+silently on the user's desktop against their instruction to test manually.
+They are not proof of actual game behaviour.
+
+Next agent should start by reviewing current source and the user's still-failing
+case. Find the remaining real blocker with evidence. Check physical/remote input
+events, suspension/release guards, actual game viewport, visible/occluded pixels,
+colour variation, device/capture errors and target input acceptance. Do not
+declare victory from a build or from the previous artificial receiver alone.
+
+Deliver updated Rust source, compiled release app, rebuilt installer, required
+runtime notes, a complete ZIP and a short accurate changelog/root-cause report.
+Do not claim all UI bugs or calibration flashes are fixed without verification.
+The user previously requested a 15-minute turnaround for the initial rewrite;
+that release was produced quickly and remained runtime-unverified. Do not repeat
+that shortcut as an engineering success claim. The latest priority is reliable
+actual operation with precision, minimal measurable latency and no duplicates.
+
+PRIMARY RESEARCH LINKS
+======================
+https://learn.microsoft.com/en-us/windows/win32/direct3ddxgi/desktop-dup-api
+https://learn.microsoft.com/en-us/windows/win32/api/dxgi1_2/nf-dxgi1_2-idxgioutputduplication-acquirenextframe
+https://learn.microsoft.com/en-us/windows/win32/api/d3d11/nf-d3d11-id3d11devicecontext-copysubresourceregion
+https://learn.microsoft.com/en-us/windows/win32/direct3dhlsl/sm5-object-rwbyteaddressbuffer
+https://learn.microsoft.com/en-us/windows/win32/inputdev/wm-input
+https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-getasynckeystate
+https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-sendinput
+https://github.com/rustdesk/rustdesk/blob/master/libs/scrap/src/dxgi/mod.rs
+https://github.com/NiiightmareXD/windows-capture/blob/main/src/d3d11.rs
+https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-updatelayeredwindow
+https://learn.microsoft.com/en-us/windows/win32/winauto/client-area-animation
+
+These sources explain API constraints and implementation patterns. They do not
+establish why this user's actual game is still failing. That remains unresolved.

@@ -1,0 +1,1 @@
+FenixAT/BladeBall (https://github.com/FenixAT/BladeBall), copyright 2025 Fenix, MIT licensed, was reviewed as a reference. No Python source was copied or translated into this application. The adjacent MIT licence is retained for reference attribution.

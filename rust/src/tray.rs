@@ -10,7 +10,10 @@ pub unsafe fn add(hwnd: HWND) {
     data.uID = 1;
     data.uFlags = NIF_ICON | NIF_MESSAGE | NIF_TIP;
     data.uCallbackMessage = CALLBACK;
-    data.hIcon = LoadIconW(std::ptr::null_mut(), IDI_APPLICATION);
+    data.hIcon = LoadIconW(
+        windows_sys::Win32::System::LibraryLoader::GetModuleHandleW(std::ptr::null()),
+        101usize as *const u16,
+    );
     let text = crate::wide("Yami");
     data.szTip[..text.len()].copy_from_slice(&text);
     Shell_NotifyIconW(NIM_ADD, &data);

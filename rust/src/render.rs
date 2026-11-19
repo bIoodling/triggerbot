@@ -57,13 +57,15 @@ extern "system" {
     ) -> i32;
     fn GdipFillRectangle(g: P, b: P, x: f32, y: f32, w: f32, h: f32) -> i32;
 }
-pub const BG: u32 = 0xff09090b;
-pub const PANEL: u32 = 0xff101013;
-pub const SECOND: u32 = 0xff17171b;
-pub const BORDER: u32 = 0xff303036;
-pub const TEXT: u32 = 0xfff5f5f5;
-pub const DIM: u32 = 0xff92929b;
-pub const RED: u32 = 0xffc42b3e;
+pub const BG: u32 = 0xff09090d;
+pub const PANEL: u32 = 0xff191923;
+pub const SECOND: u32 = 0xff12121a;
+pub const BORDER: u32 = 0xff30303d;
+pub const TEXT: u32 = 0xfff5f3ff;
+pub const DIM: u32 = 0xff9893aa;
+pub const ACCENT: u32 = 0xff8b5cf6;
+pub const HOVER: u32 = 0xffa78bfa;
+pub const RED: u32 = 0xffe04457;
 pub unsafe fn startup() -> usize {
     let mut t = 0;
     GdiplusStartup(

@@ -1,0 +1,242 @@
+# Yami v1.0.6 — Window, Animation and Calibration Fixes
+
+The current application needs several refinements. I have attached a screenshot and OBS recording demonstrating its behaviour.
+
+**Do not redesign the approved UI. Preserve the existing minimalist red-and-black theme, typography, layout, and functionality.**
+
+Focus exclusively on the following issues.
+
+## 1. Always-on-top windows
+
+Both the Yami installer and main application must remain above ordinary application windows.
+
+Use native Windows topmost window behaviour.
+
+Requirements:
+- Installer: always on top.
+- Main application: always on top.
+- Settings and colour picker: remain correctly associated with the main application.
+- Confirmation dialogs: appear above their parent window.
+- No focus stealing during background operation.
+- No interference with Windows UAC or secure desktop.
+
+Do not repeatedly force focus or reposition windows in a background loop.
+
+## 2. Installer positioning
+
+The installer currently opens too high on my display.
+
+Fix this completely.
+
+- Centre the installer horizontally and vertically.
+- Use the active monitor's usable work area.
+- Account for the Windows taskbar.
+- Support different resolutions and DPI scaling.
+- Calculate the position after the final window dimensions are known.
+- Prevent the installer from opening partially off-screen.
+- Make the installer non-draggable.
+- Disable window resizing.
+- Do not allow users to move it by dragging the title bar.
+
+For a 1920 × 1080 display, the installer should appear visually centred within the usable desktop area.
+
+The installer must not jump after appearing.
+
+## 3. Main application positioning
+
+Every time the main Yami window is launched from a fresh process, it should appear centred on the active monitor.
+
+Requirements:
+- Centre before making the window visible.
+- Avoid briefly displaying the window at the wrong position.
+- Support different resolutions and DPI scaling.
+- Keep the window draggable.
+- Disable resizing.
+- Preserve the approved compact dimensions.
+
+Do not reuse stale window coordinates from previous sessions.
+
+## 4. Smooth launch animations
+
+Add a subtle, polished opening animation to both the installer and main application.
+
+Animation specification:
+- Duration: approximately 180–220 ms.
+- Fade from transparent to fully visible.
+- Optional very subtle scale transition from 98% to 100%.
+- Smooth ease-out interpolation.
+- No bouncing.
+- No exaggerated movement.
+- No blur.
+- No glowing effects.
+
+The animation must be stable at different display refresh rates.
+
+Use frame-time-based interpolation rather than fixed per-frame movement.
+
+Avoid repeatedly resizing or repositioning the native window during animation if this causes jitter.
+
+Respect Windows reduced-motion preferences.
+
+The application should appear polished, not animated like a gaming launcher.
+
+## 5. Default configuration
+
+On a genuinely fresh installation with no existing user configuration:
+
+- Toggle: Not set.
+- Hold: Not set.
+- Trigger: Not set.
+- Target colour: `#FFFFFF`.
+- Fixed Point: Disabled.
+- Application status: Ready, once initialisation is complete.
+
+Do not automatically assign E, F, R, or any other key.
+
+Do not use `#00FF00` as the default colour anymore.
+
+Existing user settings should remain preserved during normal updates.
+
+If the application is installed for the first time, generate the new default configuration.
+
+Do not confuse first installation with application relaunch.
+
+Ensure unassigned bindings never cause accidental input.
+
+## 6. Fixed Point calibration — Black flickering
+
+The current calibration feature causes severe black flickering when moving the mouse.
+
+This is unacceptable.
+
+Inspect the calibration implementation and identify the actual cause.
+
+Potential areas to investigate:
+- Repeated creation or destruction of fullscreen windows.
+- Transparent overlay composition.
+- Incorrect window invalidation.
+- Screen capture resource resets.
+- Direct3D swap-chain recreation.
+- Excessive redraws.
+- Incorrect layered-window handling.
+- Capture recursion involving the application's own overlay.
+
+Do not assume one of these is the cause without inspecting the code.
+
+### Required behaviour
+
+When clicking Calibrate:
+
+1. Enter calibration mode.
+2. Present a lightweight, stable calibration interface.
+3. Allow the user to choose a screen position.
+4. Capture the selected coordinates.
+5. Convert them into normalised viewport coordinates.
+6. Save the calibration.
+7. Close the calibration interface cleanly.
+8. Return to Settings.
+
+Moving the mouse must not cause fullscreen black flashes.
+
+Do not recreate the overlay every time the cursor moves.
+
+Do not repeatedly switch display modes.
+
+Do not continuously resize or reposition fullscreen windows.
+
+Use a single persistent calibration overlay where appropriate.
+
+Keep calibration separate from the normal detection-processing loop.
+
+Ensure all calibration resources are released when finished or cancelled.
+
+Escape should cancel calibration safely.
+
+If the application loses focus or the target display changes, handle the interruption without leaving a black overlay behind.
+
+## 7. Exit confirmation
+
+Clicking the main application's X button must display a compact confirmation dialog.
+
+Title:
+
+`Close Yami?`
+
+Description:
+
+`Are you sure you want to exit?`
+
+Buttons:
+- Cancel.
+- Exit.
+
+Use the existing minimalist red-and-black design.
+
+Cancel returns to the application.
+
+Exit performs a clean shutdown.
+
+The confirmation must:
+- Appear centred relative to the main window.
+- Remain above the main window.
+- Prevent duplicate confirmation dialogs.
+- Support keyboard navigation.
+- Use Escape to cancel.
+- Never accidentally trigger application keybindings.
+
+Exiting must stop active processing, release held synthetic inputs if necessary, save settings, and remove the system-tray icon.
+
+Minimising must continue to hide the window to the tray without displaying the exit confirmation.
+
+The tray's Exit action should follow the same clean shutdown procedure.
+
+## 8. Installer polish
+
+Preserve the current installer layout.
+
+Add the smooth opening animation described above.
+
+Ensure:
+- Progress updates are smooth and accurate.
+- Buttons remain responsive.
+- Installation progress never moves backwards.
+- The interface does not freeze.
+- No unexpected window movement occurs.
+- Replacement confirmation remains correctly centred.
+- The installer closes cleanly after successful installation.
+
+Do not change the installation directory or existing installation architecture.
+
+## 9. Important restrictions
+
+Do not:
+- Redesign the UI.
+- Change the colour scheme.
+- Add unnecessary controls.
+- Add animations to every interaction.
+- Modify the detection algorithm as part of these UI fixes.
+- Introduce new background services.
+- Add a triggerbot testing utility.
+- Perform gameplay testing.
+- Add unnecessary dependencies.
+
+Keep all changes focused on window management, initial configuration, animation, calibration stability, and shutdown.
+
+## 10. Delivery
+
+I will manually test the finished application.
+
+Perform a quick compilation check and basic error review.
+
+Deliver:
+- Updated Rust source.
+- Compiled release executable.
+- Updated installer.
+- Complete distribution ZIP.
+- Short changelog.
+
+Explain the cause of the calibration flickering if identified.
+
+Do not claim the flickering is fixed without verifying the relevant code path.
+
+**Final priority: Both windows always on top, accurate screen centring, smooth launch animations, correct fresh-install defaults, stable calibration without black flickering, and a clean exit confirmation.**

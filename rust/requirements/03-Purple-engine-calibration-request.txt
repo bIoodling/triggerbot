@@ -1,0 +1,238 @@
+# CODEX — YAMI v1.0.6
+## Complete Engine Repair, UI Overhaul, Animations and Windows Installer
+
+### YOUR ROLE
+
+You are the lead Rust and Windows application developer responsible for completing **Yami**, a standalone, high-performance colour-detection triggerbot designed primarily for Roblox Blade Ball.
+
+**Main GitHub repository:**
+https://github.com/bIoodling/triggerbot
+
+You have permission to inspect, modify, refactor, and rebuild the application directly inside this repository.
+
+The previous implementations have repeatedly failed. Although the application compiles, its detection system does not work reliably, its calibration feature causes black-screen flashing, and its interface has multiple visual and functional problems.
+
+**Your primary objective is to deliver a fully functioning application, not another build containing minor cosmetic changes.**
+
+---
+
+## 1. OPEN-SOURCE BLADE BALL REFERENCE
+
+Study this specific project:
+
+**FenixAT — BladeBall**
+
+https://github.com/FenixAT/BladeBall
+
+This is an external Blade Ball automation project using Python, OpenCV and screen-based ball detection.
+
+It is the only external triggerbot reference required for this task.
+
+Examine its actual source code to understand:
+
+- How the application captures screen content.
+- How it identifies the relevant ball or colour.
+- How it processes consecutive frames.
+- How it decides when to trigger an action.
+- How it handles keyboard input.
+- How its detection loop operates.
+- How it avoids unnecessary processing.
+
+**Critical difference:** The reference may focus on detecting a red ball. Yami must not be restricted to red.
+
+Yami must detect **any valid 24-bit RGB colour**, selected through its colour picker or HEX input.
+
+Examples include:
+
+- `#FF0000` — Red
+- `#00FF00` — Green
+- `#0000FF` — Blue
+- `#FF00FF` — Magenta
+- `#FFFFFF` — White
+- `#000000` — Black
+- `#7B2FFF` — Purple
+
+All 16,777,216 RGB combinations must be representable as detection targets.
+
+Do not hardcode a limited list of supported colours.
+
+Do not copy the Python implementation directly into Rust. Adapt its relevant detection concepts to Yami's existing Windows capture architecture, respecting its licence.
+
+---
+
+## 2. INVESTIGATE AND REPAIR THE DETECTION ENGINE
+
+Inspect the complete existing repository before making changes.
+
+Pay particular attention to:
+
+- `rust/src/gpu.rs`
+- `rust/src/capture.rs`
+- `rust/src/trigger.rs`
+- `rust/src/input.rs`
+- `rust/src/config.rs`
+- `rust/src/ui.rs`
+- Existing HLSL shaders.
+- Original C++ implementation, if present.
+
+Trace the entire pipeline:
+
+**Screen Capture → Pixel Analysis → Colour Matching → Activation State → Trigger Decision → Output Input**
+
+Identify the actual reason the current triggerbot fails.
+
+Do not assume that a successful Windows build proves that the engine works.
+
+### Detection requirements
+
+Implement reliable:
+
+1. Configurable RGB/HEX colour detection.
+2. Colour tolerance for antialiasing and minor visual differences.
+3. Detection within a configurable region around the cursor.
+4. Detection around a calibrated Fixed Point.
+5. Correct processing of RGB and BGRA pixel formats.
+6. Accurate coordinate mapping across display resolutions.
+7. DPI-aware monitor handling.
+8. Reliable frame acquisition.
+9. Recovery from temporary capture failures.
+10. Proper handling of changing display modes.
+11. Efficient GPU resource reuse.
+12. Correct keyboard and mouse output dispatch.
+
+The system must work with the configured colour regardless of whether that colour is red, green, blue, white, purple, or another RGB value.
+
+Avoid accidentally detecting a colour because of incorrect channel ordering.
+
+### Trigger behaviour
+
+Implement a deterministic state machine:
+
+`IDLE → ARMED → FIRED → WAITING_FOR_CLEAR → ARMED`
+
+Required behaviour:
+
+- The Hold key activates detection.
+- Detection triggers the configured output.
+- A continuously visible target produces only one trigger.
+- The trigger rearms after the colour genuinely disappears.
+- Reappearance permits another trigger.
+- Releasing Hold immediately disables detection.
+- Disabling the triggerbot resets the appropriate state.
+- Changing the configured colour resets stale detection state.
+
+Do not implement repeated clicking as a workaround for broken detection.
+
+---
+
+## 3. PERFORMANCE AND LATENCY
+
+Yami must be responsive without unnecessarily consuming system resources.
+
+Optimise:
+
+- Capture-region size.
+- GPU-to-CPU synchronisation.
+- Shader execution.
+- Frame-processing frequency.
+- Colour comparisons.
+- Input dispatch.
+- Memory allocation.
+- Thread coordination.
+
+Avoid:
+
+- Capturing the entire desktop when a small region is sufficient.
+- Recreating GPU resources every frame.
+- Processing stale frames as fresh detections.
+- Running multiple duplicate capture loops.
+- Excessive CPU polling while disabled.
+- Blocking the UI thread.
+- Unnecessary delays between detection and output.
+
+Use measurements to evaluate latency.
+
+Do not claim guaranteed reaction times without evidence.
+
+---
+
+## 4. FIXED POINT CALIBRATION — COMPLETE REPAIR
+
+The current calibration implementation is broken.
+
+It repeatedly flashes the screen black and does not provide a polished selection experience.
+
+Rebuild this feature.
+
+### Required behaviour
+
+When the user clicks **Calibrate**:
+
+1. Hide the Yami application.
+2. Start a stable calibration session.
+3. Display a glowing red X marker at the cursor position.
+4. Hide the normal cursor where appropriate to prevent overlapping cursors.
+5. Allow the user to move the marker freely.
+6. Left-click confirms the selected position.
+7. Escape cancels without overwriting previous calibration.
+8. Restore the cursor.
+9. Close all temporary overlays.
+10. Restore the Yami interface.
+
+### Technical requirements
+
+- No fullscreen black flashing.
+- No repeated recreation of calibration windows.
+- No unnecessary fullscreen redraws.
+- No invisible overlay remaining after calibration.
+- No stuck mouse capture.
+- No persistent cursor hiding.
+- Correct cleanup on errors.
+- Correct handling of multiple monitors.
+
+Store the selected position as normalised coordinates relative to the target window.
+
+Ensure the detector uses the actual calibrated position.
+
+---
+
+## 5. COMPLETE UI REPAIR
+
+Yami should have a compact, premium-looking dark interface with restrained purple accents.
+
+Do not replace it with a generic Windows Forms-style dashboard.
+
+### Visual design
+
+Use a consistent palette:
+
+- Background: `#09090D`
+- Secondary background: `#12121A`
+- Panels: `#191923`
+- Borders: `#30303D`
+- Primary accent: `#8B5CF6`
+- Hover accent: `#A78BFA`
+- Main text: `#F5F3FF`
+- Secondary text: `#9893AA`
+
+Use rounded corners, clean typography, subtle borders and consistent spacing.
+
+Avoid excessive gradients, bright neon effects and unnecessary decorations.
+
+### Window dimensions
+
+The Main and Settings pages must have **exactly the same outer dimensions**.
+
+Use a compact fixed design size, approximately:
+
+**400 × 420 logical pixels**
+
+Adjust the internal layout to fit properly.
+
+Do not make the Settings window taller when Fixed Point is enabled.
+
+Do not resize the application when navigating between pages.
+
+### Window positioning
+
+Fix

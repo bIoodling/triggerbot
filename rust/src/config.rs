@@ -27,7 +27,7 @@ impl Default for Config {
             toggle: 0,
             hold: 0,
             output: 0,
-            rgb: 0x00ff00,
+            rgb: 0xffffff,
             fixed: false,
             calibrated: false,
             x: 0.5,
@@ -98,7 +98,7 @@ fn migrate() -> Config {
                 ("Activation", "PrimaryVK") => c.toggle = value.parse().unwrap_or(0),
                 ("Activation", "HoldVK") => c.hold = value.parse().unwrap_or(0),
                 ("Output", "VK") => c.output = value.parse().unwrap_or(0),
-                ("Detector", "TargetRGB") => c.rgb = parse(value).unwrap_or(0x00ff00),
+                ("Detector", "TargetRGB") => c.rgb = parse(value).unwrap_or(0xffffff),
                 ("Detection", "Cursorless") => c.fixed = value == "1",
                 ("Detection", "Calibrated") => c.calibrated = value == "1",
                 ("Detection", "NormalizedX") => c.x = value.parse().unwrap_or(0.5),
@@ -130,6 +130,14 @@ pub fn save(c: &Config) -> io::Result<()> {
         {
             return Err(io::Error::last_os_error());
         }
+    }
+    Ok(())
+}
+pub fn initialize_if_new(c: &Config) -> io::Result<()> {
+    let legacy =
+        PathBuf::from(std::env::var_os("APPDATA").unwrap_or_default()).join("YamiTB/settings.ini");
+    if !path().exists() && !legacy.exists() {
+        save(c)?;
     }
     Ok(())
 }

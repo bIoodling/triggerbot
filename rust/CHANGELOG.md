@@ -1,4 +1,32 @@
+# Latest revision — 2026-11-19
+
+- Purple palette; Main/Settings fixed at 400x420, with radius/tolerance controls and hover feedback.
+- Re-evaluate identical GPU ROI on confirmed unchanged DXGI timeout; qualified clear can now rearm without requiring unrelated screen animation. Count fresh frames separately.
+- Explicit IDLE/ARMED/FIRED/WAITING_FOR_CLEAR latch; retain generation/Hold guards and add point/foreground validation before dispatch.
+- Red X alpha calibration marker, balanced cursor cleanup, overlay error cleanup; retain hidden-GUI eyedropper and normalized calibration.
+- Warn about old running versions rather than silently restore an obsolete build.
+- Save bounded session counters and iteration-to-SendInput timing at clean exit; no gameplay latency claims.
+- Studied actual FenixAT/BladeBall code and licence; documented differences and verification limits.
+- Release app/installer builds and three noninteractive latch checks pass. Live capture-to-game, UI, calibration, installer and DPI acceptance remain unverified for this revision.
+
+--- Historical changelog ---
+
 # Yami 1.0.6
+
+## Repair build
+
+- Repaired Hold activation for valid Windows input without Raw Input edges;
+  unified Toggle edges and removed sticky Settings suspension.
+- Verified real capture-to-received-input in both modes, tolerance boundaries,
+  reappearance, Hold release and DXGI pixel sampling.
+- Added topmost/centred windows, reduced-motion-aware launch fade, #FFFFFF fresh
+  defaults, exit confirmation and shutdown cleanup.
+- Replaced fullscreen calibration painting with a tiny alpha marker and added
+  whole-GUI-hidden calibration/eyedropper selection.
+- UI and installer runtime verification remain for manual testing. See
+  REPAIR-NOTES.md for confirmed causes and verification limits.
+
+## Original Rust build
 
 - Rewrote the application and separate installer in Rust with native Windows APIs.
 - Added the compact near-black/crimson main, Settings, picker, installer and
