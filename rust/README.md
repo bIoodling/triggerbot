@@ -1,44 +1,24 @@
-# Yami v1.0.6 — Rust repair candidate
+# Yami v1.0.6 — left-click repair revision
 
-Current source is in this directory. The latest changes and evidence are in [ENGINE-REPAIR-2026-11-19.md](ENGINE-REPAIR-2026-11-19.md). The user reported the preceding build still failed; this build has not been run in Roblox or visually checked. Compilation and state-machine checks do not prove the game pipeline works.
+Current changes and verification limits: [CLICK-REPAIR-2026-11-20.md](CLICK-REPAIR-2026-11-20.md). The preceding version was reported nonfunctional. This build passes headless checks and compiles; live Roblox and visual operation have not been verified.
 
-## Run and configure
+Run Yami.exe directly or Yami-Setup.exe to install per-user. Exit any old tray instance first. Windows10/11 x64 with Direct3D11 feature level11.0 is required. Only Windows system DLLs are imported; end users do not need Rust, Python, OpenCV, .NET or a separate Visual C++ runtime.
 
-Run Yami.exe directly or use Yami-Setup.exe for a per-user installation. Windows 10/11 x64 and a Direct3D 11 feature-level 11.0 GPU are required. The executables use Windows system libraries with the CRT linked statically; end users do not need Rust, .NET or a separate Visual C++ runtime.
+Settings contains Toggle, mandatory Hold, Radius (1..8 physical pixels, default2), Fixed Point and calibration. Output is always LEFT MOUSE CLICK. There is no Trigger/output key or visible RGB tolerance field. Fresh bindings are Not set and colour is #FFFFFF. Default internal RGB tolerance is8/channel; valid existing values persist. Binding capture commits on release. Mouse4/5 and individual keyboard keys are allowed; left/right/middle mouse, Windows/system keys, chords and duplicate Toggle/Hold bindings are rejected. Escape clears, outside click cancels. Unrelated keyboard activity does not disarm detection.
 
-Exit an older Yami tray instance first. The new build warns if a different version is already running. The application and visible process are named Yami.
+The compact picker opens as a child panel attached to Main, expanding the same draggable HWND. HEX is a native text field with caret, selection, navigation, Delete/Backspace and paste. Apply validates and saves. The eyedropper hides the application, samples under the cursor, and accepts left-click/Escape. Fixed Point calibration hides Yami, displays a small thin alpha red X, stores normalized client coordinates and restores the cursor/UI. The calibrated target must be foreground; ordinary left clicks go to the current cursor location. The detector does not move your cursor or bypass target input restrictions.
 
-Main and Settings use the same 400x420 logical outer dimensions and the latest purple palette. Settings contains Toggle, mandatory Hold, Trigger, RGB tolerance, ROI radius and Fixed Point/calibration. Set distinct Hold and Trigger keys. Toggle changes master permission; it does not replace Hold. Fresh bindings are Not set; a fresh colour is #FFFFFF. Existing settings are preserved. Escape clears a captured binding; an outside click cancels it. Unassigned bindings cannot activate.
+Settings automatically save to %APPDATA%/Yami/settings.json; old output fields are ignored, invalid/duplicate old bindings sanitized, and oversized legacy radius reset to2. Legacy YamiTB/settings.ini migration remains. Minimise hides to tray; double-click restores; tray Open/Exit remain. Main X asks for confirmation. Both base pages are400x420 logical pixels; the attached picker temporarily adds248 logical width. Always-on-top, launch centring, owned confirmation and the per-user installer are retained.
 
-Click the swatch/HEX button for the hue wheel, saturation/value square and HEX editor. HEX supports Ctrl+A/Ctrl+V/Backspace and rejects invalid values. Apply commits the selected value. Eyedropper temporarily hides all Yami windows; left-click selects and Escape cancels. The preview remains offset from the sampled pixel.
-
-Fixed Point calibration hides the application and uses a small red X, left-click confirm/Escape cancel, then restores Yami. Select within the intended application's client area. The saved normalized position follows that application's current foreground client bounds. Cursor mode uses physical mouse coordinates. Both modes require Hold. Neither mode tracks a ball or moves the cursor. Radius is 1..128 physical pixels, tolerance 0..16 per channel.
-
-Settings save automatically to %APPDATA%/Yami/settings.json. When no JSON exists, legacy %APPDATA%/YamiTB/settings.ini bindings/colour/calibration are imported. Minimise hides to the notification area; double-click restores; the tray offers Open and Exit. The main X requests exit confirmation. Clean exit saves settings and removes the tray icon. The process remains visible to Windows and security tools.
-
-## Detection and diagnostic limits
-
-One DXGI/D3D11 worker copies only a bounded ROI, performs arbitrary RGB comparison on the GPU and reads a four-byte result. The explicit event latch consumes a continuous highlight once and rearms after qualified clear observations. Successful timeouts can confirm an identical cached ROI is unchanged; capture errors cannot. Hold release, configuration generations and point/foreground changes reject stale output.
-
-Ordinary tagged SendInput sends one keyboard/mouse down/up pair. A Windows accepted pair is not proof of game consumption. No process hiding, injection, drivers or input restriction bypass is included. No measured gameplay latency or working-game claim is made.
-
-After a clean exit, inspect %APPDATA%/Yami/engine-session.json for captured frames, matching observations, accepted input pairs, iteration-to-input timing and last error. Capture/input errors also go to engine.log. Timing excludes game processing and display delay. Zero timing means no accepted pair was measured. The complete manual acceptance list is in the repair notes.
-
-## Install and remove
-
-Setup installs to %LOCALAPPDATA%/Yami, confirms replacement, verifies staged bytes with SHA-256, backs up owned files, rolls back on replacement/registration failure, registers Windows Installed Apps and launches the installed EXE. Run Setup outside the destination directory. Existing instances must close cleanly; they are never killed. Installed Apps/Uninstall.exe removes only owned binaries and registration, preserving configuration. A temporary uninstaller helper can remain until Windows Temp cleanup. Installation and removal were not executed for this revision.
-
-## Build
-
-Developers need Rust x64 MSVC, Visual C++ Build Tools and a Windows SDK. Run build.ps1 from this directory or:
+Build from THIS directory so .cargo/config.toml supplies static-CRT settings:
 
 ~~~powershell
 cargo build --locked --release --bin Yami
 cargo build --locked --release --features installer --bin Yami-Setup
 ~~~
 
-Build the app FIRST: Setup embeds target/release/Yami.exe. Run Cargo from this directory so .cargo/config.toml supplies static-CRT flags. Cargo.lock is included. GDI+/Win32 draw the UI; HLSL is embedded. No Python, OpenCV or external engine runtime is required.
+Or run build.ps1. Build the app first: Setup embeds target/release/Yami.exe. Developers need Rust x64 MSVC, Visual C++ Build Tools and a Windows SDK. Setup installs to %LOCALAPPDATA%/Yami, confirms replacement, verifies staged bytes, registers Installed Apps and launches Yami. Uninstallation preserves settings. The installer has not been executed for this revision.
 
-Noninteractive event-state checks: cargo test --lib event::tests. Desktop integration checks are ignored/opt-in and were not run for this revision. Do not run those on the user's desktop without authorization.
+Noninteractive verification: cargo test --lib. Ten checks pass, including the actual HLSL on D3D11 WARP, colour/ROI/tolerance, event-to-click-pair construction, WASD isolation, invalid binding policy and JSON migration. Two desktop-interaction tests are ignored and were not run. These checks do not establish actual OS/game click reception, visual correctness or display-to-action latency. No1ms guarantee is made.
 
-The full reference review, current limits and manual checks are in ENGINE-REPAIR-2026-11-19.md. Historical REPAIR-NOTES.md and HANDOFF.txt describe earlier work; the newest purple specification overrides the older red screenshot. The latest supplied request ends abruptly at Window positioning / Fix; earlier positioning requirements were retained.
+After manual use and clean exit, inspect %APPDATA%/Yami/engine-session.json and engine.log if needed. Timing covers acquisition/GPU work through accepted SendInput, not game consumption or presentation. Complete pending manual checks and detailed source findings are in the linked repair notes. HANDOFF.txt includes this update and historical context; the latest request is requirements/04-Final-polish-left-click-request.txt.

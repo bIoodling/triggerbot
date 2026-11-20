@@ -5,6 +5,7 @@ pub mod event;
 pub mod gpu;
 pub mod input;
 pub mod install;
+pub mod motion;
 pub mod render;
 pub mod tray;
 pub mod trigger;

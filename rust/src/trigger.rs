@@ -222,19 +222,18 @@ pub fn start(shared: Arc<Shared>) -> std::thread::JoinHandle<()> {
                     c.require_hold_release = false;
                     c.held = false;
                 }
-                let over_ui = !c.config.fixed && input::pointer_over(c.ui_hwnd);
+                let over_ui = input::pointer_over(c.ui_hwnd);
                 if !c.enabled
                     || c.suspended
                     || !held
                     || c.require_hold_release
                     || over_ui
                     || c.config.hold == 0
-                    || c.config.output == 0
                 {
                     latch.reset(false);
                     shared.status.store(
                         if c.enabled && shared.last_error.lock().unwrap().is_none() {
-                            if c.config.hold == 0 || c.config.output == 0 {
+                            if c.config.hold == 0 {
                                 3
                             } else {
                                 0
@@ -244,11 +243,7 @@ pub fn start(shared: Arc<Shared>) -> std::thread::JoinHandle<()> {
                         },
                         Ordering::Release,
                     );
-                    let idle_ms = if !c.enabled
-                        || c.suspended
-                        || c.config.hold == 0
-                        || c.config.output == 0
-                    {
+                    let idle_ms = if !c.enabled || c.suspended || c.config.hold == 0 {
                         50
                     } else {
                         2
@@ -315,7 +310,7 @@ pub fn start(shared: Arc<Shared>) -> std::thread::JoinHandle<()> {
             if gpu.as_ref().unwrap().last_fresh {
                 shared.frames.fetch_add(1, Ordering::Relaxed);
             }
-            let mut c = shared.control.lock().unwrap();
+            let c = shared.control.lock().unwrap();
             if c.generation != version
                 || !c.enabled
                 || c.suspended
@@ -326,9 +321,13 @@ pub fn start(shared: Arc<Shared>) -> std::thread::JoinHandle<()> {
                 latch.reset(false);
                 continue;
             }
-            // A foreground change or cursor movement while GPU work was pending
-            // invalidates that result before it can dispatch to a different ROI.
-            if crate::capture::point(cfg, cached_viewport) != Some((point, monitor)) {
+            // Fixed Point must still map to its intended foreground client.
+            // Cursor observations must not be discarded merely because the
+            // pointer moved during GPU processing; only guard our own UI here.
+            if input::pointer_over(c.ui_hwnd)
+                || (cfg.fixed
+                    && crate::capture::point(cfg, cached_viewport) != Some((point, monitor)))
+            {
                 latch.invalidate_clear();
                 continue;
             }
@@ -345,11 +344,9 @@ pub fn start(shared: Arc<Shared>) -> std::thread::JoinHandle<()> {
             ) {
                 // Consume the event before attempting input; a failed dispatch
                 // cannot create a burst of retries on a continuous highlight.
-                if cfg.output == cfg.toggle {
-                    c.ignore_toggle_until_up = true;
-                }
-                if input::send(cfg.output) {
+                if input::click() {
                     shared.outputs.fetch_add(1, Ordering::Relaxed);
+                    *shared.last_error.lock().unwrap() = None;
                     let us = iteration_started
                         .elapsed()
                         .as_micros()
@@ -370,11 +367,11 @@ pub fn start(shared: Arc<Shared>) -> std::thread::JoinHandle<()> {
         // process and Windows acceptance, not proof that a game consumed input.
         let c = shared.control.lock().unwrap();
         let report = serde_json::json!({
-            "build": "1.0.6-purple-repair",
+            "build": "1.0.6-click-repair",
             "target_rgb": crate::config::hex(c.config.rgb),
             "tolerance": c.config.tolerance, "radius": c.config.radius,
             "fixed": c.config.fixed, "calibrated": c.config.calibrated,
-            "hold": crate::input::name(c.config.hold), "trigger": crate::input::name(c.config.output),
+            "hold": crate::input::name(c.config.hold), "output": "Left mouse click",
             "fresh_frames": shared.frames.load(Ordering::Relaxed),
             "valid_observations": shared.observations.load(Ordering::Relaxed),
             "matching_observations": shared.matches.load(Ordering::Relaxed),

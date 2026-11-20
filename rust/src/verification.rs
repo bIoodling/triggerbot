@@ -47,11 +47,11 @@ unsafe extern "system" fn scene(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) -> L
             EndPaint(hwnd, &ps);
             0
         }
-        WM_KEYDOWN if w == 135 => {
+        WM_LBUTTONDOWN => {
             DOWNS.fetch_add(1, Ordering::Relaxed);
             0
         }
-        WM_KEYUP if w == 135 => {
+        WM_LBUTTONUP => {
             UPS.fetch_add(1, Ordering::Relaxed);
             0
         }
@@ -97,7 +97,7 @@ unsafe fn key(hwnd: HWND, v: u16, down: bool) {
     pump(hwnd, 12);
 }
 #[test]
-#[ignore = "requires an interactive Windows desktop; emits F22/F23/F24 only to its own receiver"]
+#[ignore = "requires an interactive Windows desktop; moves the cursor and emits F22/F23 plus left mouse clicks to its own receiver"]
 fn capture_to_received_input_both_modes() {
     unsafe {
         DOWNS.store(0, Ordering::Relaxed);
@@ -138,16 +138,18 @@ fn capture_to_received_input_both_modes() {
             c.config = crate::config::Config {
                 toggle: 133,
                 hold: 134,
-                output: 135,
                 rgb: COLOR,
                 tolerance: 3,
-                radius: 12,
+                radius: 2,
                 ..Default::default()
             };
             c.enabled = true;
             c.suspended = false;
             c.held = false;
         });
+        for movement in [87, 65, 83, 68] {
+            key(hwnd, movement, true);
+        }
         key(hwnd, 134, true);
         assert!(crate::input::down(134), "Windows Hold state is not down");
         let worker = crate::trigger::start(Arc::clone(&shared));
@@ -249,6 +251,9 @@ fn capture_to_received_input_both_modes() {
         pump(hwnd, 100);
         let sampled = *shared.sampled_pixel.lock().unwrap();
         shared.control.lock().unwrap().sample_request = None;
+        for movement in [87, 65, 83, 68] {
+            key(hwnd, movement, false);
+        }
         let total = DOWNS.load(Ordering::Relaxed);
         shared.running.store(false, Ordering::Release);
         shared.wake.notify_all();

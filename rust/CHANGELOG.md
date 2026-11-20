@@ -1,3 +1,14 @@
+# 2026-11-20 — left-click engine and attached picker
+
+- Fixed left-click output; removed output binding/configuration and obsolete activation gate.
+- Fresh cursor position at capture, removed movement-induced result starvation, small5x5 default ROI and17x17 reusable storage.
+- Added binding allowlist, release-based chord rejection, duplicate prevention and legacy cleanup; preserved normal WASD input.
+- Compact attached picker, native HEX editor, aligned two-bind Settings, hidden tolerance editor, thin red X and simpler icons.
+- Added page/hover/pressed/toggle/picker/close transitions and DPI text sizing.
+- Ten windowless checks pass and both release binaries compile. Live desktop/game and visual checks remain unverified.
+
+--- Earlier changes ---
+
 # Latest revision — 2026-11-19
 
 - Purple palette; Main/Settings fixed at 400x420, with radius/tolerance controls and hover feedback.

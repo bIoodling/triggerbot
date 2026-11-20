@@ -15,13 +15,7 @@ pub struct Detector {
     context: ID3D11DeviceContext,
     dup: IDXGIOutputDuplication,
     desc: DXGI_OUTPUT_DESC,
-    shader: ID3D11ComputeShader,
-    roi: ID3D11Texture2D,
-    srv: ID3D11ShaderResourceView,
-    result: ID3D11Buffer,
-    read: ID3D11Buffer,
-    uav: ID3D11UnorderedAccessView,
-    params: ID3D11Buffer,
+    matcher: Matcher,
     sample: ID3D11Texture2D,
 }
 impl Drop for Detector {
@@ -106,86 +100,7 @@ impl Detector {
                 let context = context.unwrap();
                 let output: IDXGIOutput1 = output.cast()?;
                 let dup = output.DuplicateOutput(&device)?;
-                let code = include_bytes!("../assets/ColorDetect.hlsl");
-                let mut compiled = None;
-                D3DCompile(
-                    code.as_ptr().cast(),
-                    code.len(),
-                    s!("ColorDetect.hlsl"),
-                    None,
-                    None,
-                    s!("main"),
-                    s!("cs_5_0"),
-                    D3DCOMPILE_OPTIMIZATION_LEVEL3,
-                    0,
-                    &mut compiled,
-                    None,
-                )?;
-                let blob = compiled.unwrap();
-                let bytes = std::slice::from_raw_parts(
-                    blob.GetBufferPointer().cast::<u8>(),
-                    blob.GetBufferSize(),
-                );
-                let mut shader = None;
-                device.CreateComputeShader(bytes, None, Some(&mut shader))?;
-                let td = D3D11_TEXTURE2D_DESC {
-                    Width: 257,
-                    Height: 257,
-                    MipLevels: 1,
-                    ArraySize: 1,
-                    Format: DXGI_FORMAT_B8G8R8A8_UNORM,
-                    SampleDesc: DXGI_SAMPLE_DESC {
-                        Count: 1,
-                        Quality: 0,
-                    },
-                    Usage: D3D11_USAGE_DEFAULT,
-                    BindFlags: D3D11_BIND_SHADER_RESOURCE.0 as u32,
-                    ..Default::default()
-                };
-                let mut roi = None;
-                device.CreateTexture2D(&td, None, Some(&mut roi))?;
-                let roi = roi.unwrap();
-                let mut srv = None;
-                device.CreateShaderResourceView(&roi, None, Some(&mut srv))?;
-                let bd = D3D11_BUFFER_DESC {
-                    ByteWidth: 4,
-                    Usage: D3D11_USAGE_DEFAULT,
-                    BindFlags: D3D11_BIND_UNORDERED_ACCESS.0 as u32,
-                    MiscFlags: D3D11_RESOURCE_MISC_BUFFER_ALLOW_RAW_VIEWS.0 as u32,
-                    ..Default::default()
-                };
-                let mut result = None;
-                device.CreateBuffer(&bd, None, Some(&mut result))?;
-                let result = result.unwrap();
-                let ud = D3D11_UNORDERED_ACCESS_VIEW_DESC {
-                    Format: DXGI_FORMAT_R32_TYPELESS,
-                    ViewDimension: D3D11_UAV_DIMENSION_BUFFER,
-                    Anonymous: D3D11_UNORDERED_ACCESS_VIEW_DESC_0 {
-                        Buffer: D3D11_BUFFER_UAV {
-                            FirstElement: 0,
-                            NumElements: 1,
-                            Flags: D3D11_BUFFER_UAV_FLAG_RAW.0 as u32,
-                        },
-                    },
-                };
-                let mut uav = None;
-                device.CreateUnorderedAccessView(&result, Some(&ud), Some(&mut uav))?;
-                let bd = D3D11_BUFFER_DESC {
-                    ByteWidth: 4,
-                    Usage: D3D11_USAGE_STAGING,
-                    CPUAccessFlags: D3D11_CPU_ACCESS_READ.0 as u32,
-                    ..Default::default()
-                };
-                let mut read = None;
-                device.CreateBuffer(&bd, None, Some(&mut read))?;
-                let bd = D3D11_BUFFER_DESC {
-                    ByteWidth: 48,
-                    Usage: D3D11_USAGE_DEFAULT,
-                    BindFlags: D3D11_BIND_CONSTANT_BUFFER.0 as u32,
-                    ..Default::default()
-                };
-                let mut params = None;
-                device.CreateBuffer(&bd, None, Some(&mut params))?;
+                let matcher = Matcher::new(&device)?;
                 let td = D3D11_TEXTURE2D_DESC {
                     Width: 1,
                     Height: 1,
@@ -211,13 +126,7 @@ impl Detector {
                     context,
                     dup,
                     desc,
-                    shader: shader.unwrap(),
-                    roi,
-                    srv: srv.unwrap(),
-                    result,
-                    read: read.unwrap(),
-                    uav: uav.unwrap(),
-                    params: params.unwrap(),
+                    matcher,
                     sample: sample.unwrap(),
                 });
             }
@@ -230,12 +139,19 @@ impl Detector {
         }
         Ok(())
     }
-    pub unsafe fn frame(&mut self, physical: (i32, i32), cfg: &Config) -> Result<Option<bool>> {
+    pub unsafe fn frame(&mut self, mut physical: (i32, i32), cfg: &Config) -> Result<Option<bool>> {
         self.last_fresh = false;
         self.release_owned_frame()?;
         let mut info = DXGI_OUTDUPL_FRAME_INFO::default();
         let mut resource = None;
-        match self.dup.AcquireNextFrame(8, &mut info, &mut resource) {
+        let acquired = self.dup.AcquireNextFrame(2, &mut info, &mut resource);
+        if !cfg.fixed {
+            let mut cursor = windows_sys::Win32::Foundation::POINT { x: 0, y: 0 };
+            if windows_sys::Win32::UI::WindowsAndMessaging::GetCursorPos(&mut cursor) != 0 {
+                physical = (cursor.x, cursor.y);
+            }
+        }
+        match acquired {
             Ok(()) => {
                 self.owns_frame = true;
                 // Retain only our small copied ROI. Keep the duplication lease
@@ -256,7 +172,11 @@ impl Detector {
                         DXGI_MODE_ROTATION_ROTATE270 => (x, y) = (desc.Width as i32 - 1 - y, x),
                         _ => (),
                     }
-                    let r = cfg.radius as i32;
+                    if x < 0 || y < 0 || x >= desc.Width as i32 || y >= desc.Height as i32 {
+                        self.cached_roi = None;
+                        return Ok(());
+                    }
+                    let r = cfg.radius.clamp(1, 8) as i32;
                     let (left, top, right, bottom) = (
                         (x - r).max(0),
                         (y - r).max(0),
@@ -278,7 +198,7 @@ impl Detector {
                         back: 1,
                     };
                     self.context.CopySubresourceRegion(
-                        &self.roi,
+                        &self.matcher.roi,
                         0,
                         0,
                         0,
@@ -317,60 +237,9 @@ impl Detector {
         if at != physical || radius != cfg.radius {
             return Ok(None);
         }
-        let p = [
-            w,
-            h,
-            cx,
-            cy,
-            (cfg.rgb >> 16) & 255,
-            (cfg.rgb >> 8) & 255,
-            cfg.rgb & 255,
-            cfg.tolerance,
-            cfg.radius,
-            0,
-            0,
-            0,
-        ];
-        self.context
-            .UpdateSubresource(&self.params, 0, None, p.as_ptr().cast(), 0, 0);
-        self.context
-            .ClearUnorderedAccessViewUint(&self.uav, &[0; 4]);
-        self.context.CSSetShader(&self.shader, None);
-        self.context
-            .CSSetShaderResources(0, Some(&[Some(self.srv.clone())]));
-        self.context
-            .CSSetUnorderedAccessViews(0, 1, Some([Some(self.uav.clone())].as_ptr()), None);
-        self.context
-            .CSSetConstantBuffers(0, Some(&[Some(self.params.clone())]));
-        self.context.Dispatch((w + 7) / 8, (h + 7) / 8, 1);
-        self.context.CSSetShaderResources(0, Some(&[None]));
-        self.context
-            .CSSetUnorderedAccessViews(0, 1, Some([None].as_ptr()), None);
-        self.context.CopyResource(&self.read, &self.result);
-        self.context.Flush();
-        let mut map = D3D11_MAPPED_SUBRESOURCE::default();
-        let started = std::time::Instant::now();
-        loop {
-            match self.context.Map(
-                &self.read,
-                0,
-                D3D11_MAP_READ,
-                D3D11_MAP_FLAG_DO_NOT_WAIT.0 as u32,
-                Some(&mut map),
-            ) {
-                Ok(()) => break,
-                Err(e)
-                    if e.code() == DXGI_ERROR_WAS_STILL_DRAWING
-                        && started.elapsed().as_millis() < 100 =>
-                {
-                    std::thread::yield_now()
-                }
-                Err(e) => return Err(e),
-            }
-        }
-        let found = *(map.pData as *const u32) != 0;
-        self.context.Unmap(&self.read, 0);
-        Ok(Some(found))
+        self.matcher
+            .evaluate(&self.context, [w, h, cx, cy], cfg)
+            .map(Some)
     }
     pub unsafe fn sample_pixel(&mut self, physical: (i32, i32)) -> Result<Option<u32>> {
         self.cached_roi = None;
@@ -438,5 +307,260 @@ impl Detector {
         })();
         self.dup.ReleaseFrame()?;
         result
+    }
+}
+
+struct Matcher {
+    shader: ID3D11ComputeShader,
+    roi: ID3D11Texture2D,
+    srv: ID3D11ShaderResourceView,
+    result: ID3D11Buffer,
+    read: ID3D11Buffer,
+    uav: ID3D11UnorderedAccessView,
+    params: ID3D11Buffer,
+}
+impl Matcher {
+    unsafe fn new(device: &ID3D11Device) -> Result<Self> {
+        let code = include_bytes!("../assets/ColorDetect.hlsl");
+        let mut compiled = None;
+        D3DCompile(
+            code.as_ptr().cast(),
+            code.len(),
+            s!("ColorDetect.hlsl"),
+            None,
+            None,
+            s!("main"),
+            s!("cs_5_0"),
+            D3DCOMPILE_OPTIMIZATION_LEVEL3,
+            0,
+            &mut compiled,
+            None,
+        )?;
+        let blob = compiled.unwrap();
+        let bytes =
+            std::slice::from_raw_parts(blob.GetBufferPointer().cast::<u8>(), blob.GetBufferSize());
+        let mut shader = None;
+        device.CreateComputeShader(bytes, None, Some(&mut shader))?;
+        let td = D3D11_TEXTURE2D_DESC {
+            Width: 17,
+            Height: 17,
+            MipLevels: 1,
+            ArraySize: 1,
+            Format: DXGI_FORMAT_B8G8R8A8_UNORM,
+            SampleDesc: DXGI_SAMPLE_DESC {
+                Count: 1,
+                Quality: 0,
+            },
+            Usage: D3D11_USAGE_DEFAULT,
+            BindFlags: D3D11_BIND_SHADER_RESOURCE.0 as u32,
+            ..Default::default()
+        };
+        let mut roi = None;
+        device.CreateTexture2D(&td, None, Some(&mut roi))?;
+        let roi = roi.unwrap();
+        let mut srv = None;
+        device.CreateShaderResourceView(&roi, None, Some(&mut srv))?;
+        let bd = D3D11_BUFFER_DESC {
+            ByteWidth: 4,
+            Usage: D3D11_USAGE_DEFAULT,
+            BindFlags: D3D11_BIND_UNORDERED_ACCESS.0 as u32,
+            MiscFlags: D3D11_RESOURCE_MISC_BUFFER_ALLOW_RAW_VIEWS.0 as u32,
+            ..Default::default()
+        };
+        let mut result = None;
+        device.CreateBuffer(&bd, None, Some(&mut result))?;
+        let result = result.unwrap();
+        let ud = D3D11_UNORDERED_ACCESS_VIEW_DESC {
+            Format: DXGI_FORMAT_R32_TYPELESS,
+            ViewDimension: D3D11_UAV_DIMENSION_BUFFER,
+            Anonymous: D3D11_UNORDERED_ACCESS_VIEW_DESC_0 {
+                Buffer: D3D11_BUFFER_UAV {
+                    FirstElement: 0,
+                    NumElements: 1,
+                    Flags: D3D11_BUFFER_UAV_FLAG_RAW.0 as u32,
+                },
+            },
+        };
+        let mut uav = None;
+        device.CreateUnorderedAccessView(&result, Some(&ud), Some(&mut uav))?;
+        let bd = D3D11_BUFFER_DESC {
+            ByteWidth: 4,
+            Usage: D3D11_USAGE_STAGING,
+            CPUAccessFlags: D3D11_CPU_ACCESS_READ.0 as u32,
+            ..Default::default()
+        };
+        let mut read = None;
+        device.CreateBuffer(&bd, None, Some(&mut read))?;
+        let bd = D3D11_BUFFER_DESC {
+            ByteWidth: 48,
+            Usage: D3D11_USAGE_DEFAULT,
+            BindFlags: D3D11_BIND_CONSTANT_BUFFER.0 as u32,
+            ..Default::default()
+        };
+        let mut params = None;
+        device.CreateBuffer(&bd, None, Some(&mut params))?;
+        Ok(Self {
+            shader: shader.unwrap(),
+            roi,
+            srv: srv.unwrap(),
+            result,
+            read: read.unwrap(),
+            uav: uav.unwrap(),
+            params: params.unwrap(),
+        })
+    }
+    unsafe fn evaluate(
+        &self,
+        context: &ID3D11DeviceContext,
+        [w, h, cx, cy]: [u32; 4],
+        cfg: &Config,
+    ) -> Result<bool> {
+        let p = [
+            w,
+            h,
+            cx,
+            cy,
+            (cfg.rgb >> 16) & 255,
+            (cfg.rgb >> 8) & 255,
+            cfg.rgb & 255,
+            cfg.tolerance,
+            cfg.radius,
+            0,
+            0,
+            0,
+        ];
+        context.UpdateSubresource(&self.params, 0, None, p.as_ptr().cast(), 0, 0);
+        context.ClearUnorderedAccessViewUint(&self.uav, &[0; 4]);
+        context.CSSetShader(&self.shader, None);
+        context.CSSetShaderResources(0, Some(&[Some(self.srv.clone())]));
+        context.CSSetUnorderedAccessViews(0, 1, Some([Some(self.uav.clone())].as_ptr()), None);
+        context.CSSetConstantBuffers(0, Some(&[Some(self.params.clone())]));
+        context.Dispatch((w + 7) / 8, (h + 7) / 8, 1);
+        context.CSSetShaderResources(0, Some(&[None]));
+        context.CSSetUnorderedAccessViews(0, 1, Some([None].as_ptr()), None);
+        context.CopyResource(&self.read, &self.result);
+        context.Flush();
+        let mut map = D3D11_MAPPED_SUBRESOURCE::default();
+        let started = std::time::Instant::now();
+        loop {
+            match context.Map(
+                &self.read,
+                0,
+                D3D11_MAP_READ,
+                D3D11_MAP_FLAG_DO_NOT_WAIT.0 as u32,
+                Some(&mut map),
+            ) {
+                Ok(()) => break,
+                Err(e)
+                    if e.code() == DXGI_ERROR_WAS_STILL_DRAWING
+                        && started.elapsed().as_millis() < 100 =>
+                {
+                    std::thread::yield_now()
+                }
+                Err(e) => return Err(e),
+            }
+        }
+        let found = *(map.pData as *const u32) != 0;
+        context.Unmap(&self.read, 0);
+        Ok(found)
+    }
+}
+
+#[cfg(test)]
+mod headless {
+    use super::*;
+    #[test]
+    fn production_shader_colours_tolerance_roi_and_event_to_mouse_pair() {
+        unsafe {
+            let mut device = None;
+            let mut context = None;
+            D3D11CreateDevice(
+                None,
+                D3D_DRIVER_TYPE_WARP,
+                HMODULE::default(),
+                D3D11_CREATE_DEVICE_BGRA_SUPPORT,
+                Some(&[D3D_FEATURE_LEVEL_11_0]),
+                D3D11_SDK_VERSION,
+                Some(&mut device),
+                None,
+                Some(&mut context),
+            )
+            .unwrap();
+            let device = device.unwrap();
+            let context = context.unwrap();
+            let matcher = Matcher::new(&device).unwrap();
+            let evaluate = |target: u32, pixel: u32, tolerance: u32, at: usize| {
+                let background = 0xff000000 | (!target & 0xffffff);
+                let mut pixels = [background; 17 * 17];
+                pixels[at] = 0xff000000 | pixel;
+                context.UpdateSubresource(&matcher.roi, 0, None, pixels.as_ptr().cast(), 17 * 4, 0);
+                matcher
+                    .evaluate(
+                        &context,
+                        [5, 5, 2, 2],
+                        &Config {
+                            rgb: target,
+                            tolerance,
+                            radius: 2,
+                            ..Default::default()
+                        },
+                    )
+                    .unwrap()
+            };
+            for rgb in [
+                0xff0000, 0x00ff00, 0x0000ff, 0xffffff, 0x000000, 0x7b2fff, 0x123456, 0xff00ff,
+            ] {
+                assert!(evaluate(rgb, rgb, 0, 2 * 17 + 2), "RGB #{rgb:06X}");
+                assert!(!evaluate(rgb, !rgb & 0xffffff, 8, 2 * 17 + 2));
+            }
+            assert!(
+                !evaluate(0x112233, 0x332211, 8, 2 * 17 + 2),
+                "BGRA channel reversal"
+            );
+            assert!(evaluate(0x406080, 0x406088, 8, 2 * 17 + 2));
+            assert!(!evaluate(0x406080, 0x406089, 8, 2 * 17 + 2));
+            assert!(
+                !evaluate(0xff0000, 0xff0000, 0, 0),
+                "pixel outside circular ROI"
+            );
+            let mut latch = crate::event::Latch::new();
+            latch.reset(true);
+            let mut pairs = 0;
+            for (ms, present) in [
+                (0, false),
+                (1, true),
+                (2, true),
+                (3, false),
+                (11, false),
+                (12, true),
+                (13, true),
+            ] {
+                let found = evaluate(
+                    0x7b2fff,
+                    if present { 0x7b2fff } else { 0x00ff00 },
+                    8,
+                    2 * 17 + 2,
+                );
+                if latch.observe(
+                    found,
+                    std::time::Duration::from_millis(ms),
+                    2,
+                    std::time::Duration::from_millis(8),
+                ) {
+                    assert!(crate::input::dispatch_click(|inputs| {
+                        assert_eq!(inputs.len(), 2);
+                        pairs += 1;
+                        2
+                    }));
+                    latch.dispatched();
+                }
+            }
+            assert_eq!(
+                pairs, 2,
+                "GPU results must produce one pair per qualified appearance"
+            );
+            context.ClearState();
+            context.Flush();
+        }
     }
 }

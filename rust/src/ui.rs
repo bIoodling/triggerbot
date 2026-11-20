@@ -10,7 +10,7 @@ use std::{
 use windows_sys::Win32::{
     Foundation::*,
     Graphics::Gdi::*,
-    System::{DataExchange::*, LibraryLoader::*, Memory::*, Threading::*},
+    System::{LibraryLoader::*, Threading::*},
     UI::{HiDpi::*, Input::KeyboardAndMouse::*, Input::*, WindowsAndMessaging::*},
 };
 static mut UI: *mut Ui = null_mut();
@@ -34,6 +34,7 @@ struct Ui {
     cursor_hide_calls: u32,
     screen_pick: Option<ScreenPick>,
     screen_pick_previous_focus: HWND,
+    screen_pick_started: std::time::Instant,
     screen_pick_was_picker: bool,
     mouse_hook: HHOOK,
     keyboard_hook: HHOOK,
@@ -52,14 +53,30 @@ struct Ui {
     pending_launch: Option<std::path::PathBuf>,
     radius_focus: bool,
     radius_text: String,
-    tolerance_focus: bool,
-    tolerance_text: String,
     hover: Option<(f32, f32)>,
+    pressed_ui: bool,
+    animate: bool,
+    hover_motion: std::cell::RefCell<std::collections::HashMap<u64, crate::motion::Tween>>,
+    toggle_motion: crate::motion::Tween,
+    page_motion: crate::motion::Tween,
+    panel_motion: crate::motion::Tween,
+    panel_closing: bool,
+    panel_left: bool,
+    panel_extent_px: i32,
+    closing: Option<std::time::Instant>,
+    hex_edit: HWND,
+    hex_syncing: bool,
+    hex_font: HFONT,
+    hex_font_scale: f32,
+    hex_brush: HBRUSH,
+    hex_original_proc: WNDPROC,
     scale: f32,
     picker_scale: f32,
     view: View,
     shared: Arc<Shared>,
     capture: Option<usize>,
+    capture_candidate: Option<u16>,
+    capture_invalid: bool,
     blocked: u16,
     pressed: [bool; 256],
     draft: u32,
@@ -82,14 +99,14 @@ fn hit(x: f32, y: f32, r: (f32, f32, f32, f32)) -> bool {
     x >= r.0 && y >= r.1 && x < r.0 + r.2 && y < r.1 + r.3
 }
 fn bindings(i: usize) -> (f32, f32, f32, f32) {
-    (240., 148. + i as f32 * 52., 136., 36.)
+    (240., 176. + i as f32 * 56., 136., 36.)
 }
 unsafe fn invalidate(hwnd: HWND) {
     InvalidateRect(hwnd, null(), 0);
 }
 unsafe fn dimensions(u: &Ui) -> (f32, f32) {
     match u.view {
-        View::Main | View::Settings => (400., 420.),
+        View::Main | View::Settings => (400. + 248. * u.panel_motion.value(), 420.),
         View::Install => (500., 212.),
         View::Replace => (390., 200.),
     }
@@ -101,7 +118,10 @@ unsafe fn resize(u: &mut Ui) {
     GetMonitorInfoW(MonitorFromWindow(u.hwnd, MONITOR_DEFAULTTONEAREST), &mut mi);
     u.scale = (GetDpiForWindow(u.hwnd) as f32 / 96.)
         .min((mi.rcWork.bottom - mi.rcWork.top - 20) as f32 / h)
-        .min((mi.rcWork.right - mi.rcWork.left - 20) as f32 / w);
+        .min(
+            (mi.rcWork.right - mi.rcWork.left - 20) as f32
+                / if u.payload.is_none() { 648. } else { w },
+        );
     let mut r: RECT = std::mem::zeroed();
     GetWindowRect(u.hwnd, &mut r);
     let width = (w * u.scale) as i32;
@@ -143,28 +163,36 @@ fn button(u: &Ui, g: &Canvas, label: &str, x: f32, y: f32, w: f32, h: f32, red: 
         .hover
         .map(|(px, py)| hit(px, py, (x, y, w, h)))
         .unwrap_or(false);
+    let id = ((x as u64) << 40) | ((y as u64) << 24) | ((w as u64) << 8) | u.view as u64;
+    let mut motions = u.hover_motion.borrow_mut();
+    let motion = motions
+        .entry(id)
+        .or_insert_with(|| crate::motion::Tween::new(0.));
+    motion.set(
+        if hovered {
+            if u.pressed_ui {
+                0.65
+            } else {
+                1.
+            }
+        } else {
+            0.
+        },
+        if u.animate { 150 } else { 0 },
+    );
+    let t = motion.value();
     g.round(
         x,
         y,
         w,
         h,
         7.,
-        if red {
-            if hovered {
-                HOVER
-            } else {
-                ACCENT
-            }
-        } else {
-            PANEL
-        },
-        if hovered {
-            HOVER
-        } else if red {
-            ACCENT
-        } else {
-            BORDER
-        },
+        crate::motion::mix(
+            if red { ACCENT } else { PANEL },
+            if red { HOVER } else { SECOND },
+            t,
+        ),
+        crate::motion::mix(if red { ACCENT } else { BORDER }, HOVER, t),
     );
     g.text(label, x + 4., y, w - 8., h, 16., TEXT, 400, true);
 }
@@ -172,7 +200,7 @@ unsafe fn draw(u: &Ui, g: &Canvas, picker: bool) {
     if picker {
         g.round(0.7, 0.7, 298.6, 386.6, 11., BG, BORDER);
         g.close(273., 25.);
-        for a in 0..360 {
+        for a in 0..260 {
             g.arc(
                 49.,
                 47.,
@@ -234,14 +262,29 @@ unsafe fn draw(u: &Ui, g: &Canvas, picker: bool) {
                 RED
             },
         );
-        g.text(&u.hex, 34., 278., 180., 38., 16., TEXT, 400, false);
+        // Native EDIT owns text, caret, selection, clipboard and navigation.
         g.round(238., 278., 42., 38., 7., PANEL, BORDER);
-        g.line(249., 304., 267., 286., TEXT, 2.);
-        g.line(261., 285., 269., 293., TEXT, 2.);
+        g.pen(259., 297.);
         button(u, g, "Apply", 20., 330., 260., 38., true);
+        let fade = (1. - u.panel_motion.value()).clamp(0., 1.);
+        g.round(
+            0.,
+            0.,
+            300.,
+            388.,
+            0.1,
+            ((fade * 255.) as u32) << 24 | (BG & 0xffffff),
+            0,
+        );
         return;
     }
-    let (w, h) = dimensions(u);
+    let (mut w, h) = dimensions(u);
+    if u.payload.is_none() {
+        w = 400.;
+        if u.panel_left {
+            g.translate(u.panel_extent_px as f32 / u.scale, 0.);
+        }
+    }
     g.round(0.7, 0.7, w - 1.4, h - 1.4, 11., BG, BORDER);
     g.text("Yami", 24., 8., 180., 42., 23., TEXT, 600, false);
     g.close(w - 30., 28.);
@@ -268,7 +311,7 @@ unsafe fn draw(u: &Ui, g: &Canvas, picker: bool) {
                 match status {
                     1 => "Active",
                     2 => "Disabled",
-                    3 => "Set Hold and Trigger",
+                    3 => "Set Hold binding",
                     4 => "Select target window",
                     _ => "Ready",
                 },
@@ -299,27 +342,26 @@ unsafe fn draw(u: &Ui, g: &Canvas, picker: bool) {
             g.text("Settings", 62., 364., 220., 44., 16., DIM, 400, false);
         }
         View::Settings => {
-            g.round(1., 56., 398., 42., 0.1, PANEL, 0);
             g.line(30., 77., 44., 77., TEXT, 1.5);
             g.line(30., 77., 37., 70., TEXT, 1.5);
             g.line(30., 77., 37., 84., TEXT, 1.5);
             g.text("Back", 62., 56., 250., 42., 17., TEXT, 500, false);
             g.text("Keybinds", 26., 104., 350., 36., 18., TEXT, 600, false);
             let c = u.shared.control.lock().unwrap();
-            for (i, label) in ["Toggle", "Hold", "Trigger"].iter().enumerate() {
-                let y = 148. + i as f32 * 52.;
+            for (i, label) in ["Toggle", "Hold"].iter().enumerate() {
+                let y = 176. + i as f32 * 56.;
                 g.text(label, 26., y, 200., 36., 17., TEXT, 500, false);
                 let value = if u.capture == Some(i) {
                     "Press a key...".into()
                 } else {
-                    crate::input::name([c.config.toggle, c.config.hold, c.config.output][i])
+                    crate::input::name([c.config.toggle, c.config.hold][i])
                 };
                 button(u, g, &value, 240., y, 136., 36., false);
             }
             g.text(
                 "Press Esc to unbind a key",
                 26.,
-                286.,
+                138.,
                 350.,
                 28.,
                 13.,
@@ -327,39 +369,17 @@ unsafe fn draw(u: &Ui, g: &Canvas, picker: bool) {
                 400,
                 false,
             );
-            g.text("RGB ±", 26., 320., 64., 30., 13., DIM, 400, false);
-            let valid = u
-                .tolerance_text
-                .parse::<u32>()
-                .map(|n| n <= 16)
-                .unwrap_or(false);
-            g.round(
-                90.,
-                320.,
-                62.,
-                30.,
-                6.,
-                PANEL,
-                if !valid {
-                    RED
-                } else if u.tolerance_focus {
-                    ACCENT
-                } else {
-                    BORDER
-                },
-            );
-            g.text(&u.tolerance_text, 92., 320., 58., 30., 14., TEXT, 400, true);
-            g.text("Radius", 218., 320., 80., 30., 13., DIM, 400, false);
+            g.text("Radius", 26., 292., 180., 36., 16., TEXT, 400, false);
             let radius_valid = u
                 .radius_text
                 .parse::<u32>()
-                .map(|n| (1..=128).contains(&n))
+                .map(|n| (1..=8).contains(&n))
                 .unwrap_or(false);
             g.round(
-                314.,
-                320.,
-                62.,
-                30.,
+                240.,
+                292.,
+                136.,
+                36.,
                 6.,
                 PANEL,
                 if !radius_valid {
@@ -370,7 +390,7 @@ unsafe fn draw(u: &Ui, g: &Canvas, picker: bool) {
                     BORDER
                 },
             );
-            g.text(&u.radius_text, 316., 320., 58., 30., 14., TEXT, 400, true);
+            g.text(&u.radius_text, 244., 292., 128., 36., 16., TEXT, 400, true);
             g.line(24., 358., 376., 358., BORDER, 0.7);
             g.text("Fixed Point", 26., 370., 140., 36., 17., TEXT, 500, false);
             g.round(
@@ -379,10 +399,10 @@ unsafe fn draw(u: &Ui, g: &Canvas, picker: bool) {
                 52.,
                 28.,
                 14.,
-                if c.config.fixed { ACCENT } else { SECOND },
+                crate::motion::mix(SECOND, ACCENT, u.toggle_motion.value()),
                 0,
             );
-            g.circle(if c.config.fixed { 363. } else { 337. }, 388., 11., TEXT, 0);
+            g.circle(337. + 26. * u.toggle_motion.value(), 388., 11., TEXT, 0);
             if c.config.fixed {
                 button(
                     u,
@@ -466,6 +486,12 @@ unsafe fn draw(u: &Ui, g: &Canvas, picker: bool) {
             button(u, g, "Replace", 228., 148., 136., 40., true);
         }
     }
+    if u.payload.is_none() {
+        let a = ((1. - u.page_motion.value()) * 255.).clamp(0., 255.) as u32;
+        if a > 0 {
+            g.round(1., 57., 398., 362., 0.1, (a << 24) | (BG & 0xffffff), 0);
+        }
+    }
 }
 unsafe fn paint(u: &Ui, hwnd: HWND) {
     let mut ps: PAINTSTRUCT = std::mem::zeroed();
@@ -498,61 +524,262 @@ unsafe fn paint(u: &Ui, hwnd: HWND) {
     DeleteDC(mem);
     EndPaint(hwnd, &ps);
 }
-unsafe fn close_picker(u: &mut Ui) {
+unsafe fn layout_panel(u: &mut Ui) {
+    if u.payload.is_some() {
+        return;
+    }
+    let extent = (248. * u.scale * u.panel_motion.value()).round() as i32;
+    let mut r: RECT = std::mem::zeroed();
+    GetWindowRect(u.hwnd, &mut r);
+    let work = crate::windowing::work_area(MonitorFromWindow(u.hwnd, MONITOR_DEFAULTTONEAREST));
+    let width = (400. * u.scale).round() as i32 + extent;
+    let x = (if u.panel_left {
+        r.left + u.panel_extent_px - extent
+    } else {
+        r.left
+    })
+    .clamp(work.left, (work.right - width).max(work.left));
+    u.panel_extent_px = extent;
+    SetWindowPos(
+        u.hwnd,
+        null_mut(),
+        x,
+        r.top,
+        width,
+        (420. * u.scale).round() as i32,
+        SWP_NOZORDER | SWP_NOACTIVATE,
+    );
+    SetWindowRgn(
+        u.hwnd,
+        CreateRoundRectRgn(
+            0,
+            0,
+            width + 1,
+            (420. * u.scale).round() as i32 + 1,
+            (18. * u.scale) as i32,
+            (18. * u.scale) as i32,
+        ),
+        1,
+    );
     if !u.picker.is_null() {
-        let p = u.picker;
-        u.picker = null_mut();
+        u.picker_scale = u.scale * 0.76;
+        let px = if u.panel_left {
+            extent - (238. * u.scale) as i32
+        } else {
+            (410. * u.scale) as i32
+        };
+        MoveWindow(
+            u.picker,
+            px,
+            ((420. - 388. * 0.76) / 2. * u.scale) as i32,
+            (300. * u.picker_scale) as i32,
+            (388. * u.picker_scale) as i32,
+            1,
+        );
+        if !u.hex_edit.is_null() {
+            if (u.hex_font_scale - u.picker_scale).abs() > 0.001 {
+                let font = CreateFontW(
+                    -(16. * u.picker_scale).round() as i32,
+                    0,
+                    0,
+                    0,
+                    400,
+                    0,
+                    0,
+                    0,
+                    1,
+                    0,
+                    0,
+                    5,
+                    0,
+                    wide("Segoe UI").as_ptr(),
+                );
+                if !font.is_null() {
+                    SendMessageW(u.hex_edit, WM_SETFONT, font as usize, 1);
+                    if !u.hex_font.is_null() {
+                        DeleteObject(u.hex_font);
+                    }
+                    u.hex_font = font;
+                    u.hex_font_scale = u.picker_scale;
+                }
+            }
+            MoveWindow(
+                u.hex_edit,
+                (34. * u.picker_scale) as i32,
+                (286. * u.picker_scale) as i32,
+                (180. * u.picker_scale) as i32,
+                (22. * u.picker_scale) as i32,
+                1,
+            );
+            ShowWindow(
+                u.hex_edit,
+                if !u.panel_motion.active() && !u.panel_closing {
+                    SW_SHOW
+                } else {
+                    SW_HIDE
+                },
+            );
+        }
+        invalidate(u.picker);
+    }
+    invalidate(u.hwnd);
+}
+unsafe fn destroy_picker(u: &mut Ui) {
+    let p = u.picker;
+    u.picker = null_mut();
+    u.hex_edit = null_mut();
+    if !p.is_null() {
         DestroyWindow(p);
     }
+    if !u.hex_font.is_null() {
+        DeleteObject(u.hex_font);
+        u.hex_font = null_mut();
+    }
+    if !u.hex_brush.is_null() {
+        DeleteObject(u.hex_brush);
+        u.hex_brush = null_mut();
+    }
+    u.hex_original_proc = None;
+    u.panel_motion.reset(0.);
+    u.panel_closing = false;
     u.hex_focus = false;
     u.eyedrop = false;
     u.drag = 0;
     ReleaseCapture();
-    pause(u, false);
-    invalidate(u.hwnd);
+    layout_panel(u);
+    pause(
+        u,
+        u.capture.is_some() || !u.confirm.is_null() || u.screen_pick.is_some() || u.radius_focus,
+    );
+}
+unsafe fn close_picker(u: &mut Ui) {
+    if u.picker.is_null() {
+        return;
+    }
+    u.panel_closing = true;
+    u.panel_motion.set(0., if u.animate { 170 } else { 0 });
+    u.hex_focus = false;
+    u.drag = 0;
+    ReleaseCapture();
+    EnableWindow(u.picker, 0);
+    SetFocus(u.hwnd);
+    SetTimer(u.hwnd, 5, 16, None);
+}
+unsafe extern "system" fn hex_proc(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) -> LRESULT {
+    if UI.is_null() {
+        return DefWindowProcW(hwnd, msg, w, l);
+    }
+    if msg == WM_KEYDOWN {
+        if w == 13 {
+            commit(&mut *UI);
+            return 0;
+        }
+        if w == 27 {
+            close_picker(&mut *UI);
+            return 0;
+        }
+        if w == 65 && (crate::input::down(162) || crate::input::down(163)) {
+            SendMessageW(hwnd, 0x00b1, 0, -1);
+            return 0;
+        }
+    }
+    if msg == WM_CHAR
+        && w >= 32
+        && !char::from_u32(w as u32)
+            .map(|c| c == '#' || c.is_ascii_hexdigit())
+            .unwrap_or(false)
+    {
+        return 0;
+    }
+    let original = (*UI).hex_original_proc;
+    CallWindowProcW(original, hwnd, msg, w, l)
 }
 unsafe fn open_picker(u: &mut Ui) {
     if !u.picker.is_null() {
-        SetForegroundWindow(u.picker);
+        SetFocus(u.hex_edit);
         return;
     }
     pause(u, true);
     u.draft = u.shared.control.lock().unwrap().config.rgb;
     u.hex = crate::config::hex(u.draft);
     (u.h, u.s, u.v) = render::to_hsv(u.draft);
-    u.picker_scale = GetDpiForWindow(u.hwnd) as f32 / 96.;
     let mut r: RECT = std::mem::zeroed();
     GetWindowRect(u.hwnd, &mut r);
-    let mut mi: MONITORINFO = std::mem::zeroed();
-    mi.cbSize = std::mem::size_of::<MONITORINFO>() as u32;
-    GetMonitorInfoW(MonitorFromWindow(u.hwnd, MONITOR_DEFAULTTONEAREST), &mut mi);
-    u.picker_scale = u
-        .picker_scale
-        .min((mi.rcWork.bottom - mi.rcWork.top - 20) as f32 / 388.)
-        .min((mi.rcWork.right - mi.rcWork.left - 20) as f32 / 300.);
-    let w = (300. * u.picker_scale) as i32;
-    let h = (388. * u.picker_scale) as i32;
-    let x = (r.right + 12).clamp(mi.rcWork.left, mi.rcWork.right - w);
-    let y = r.top.clamp(mi.rcWork.top, mi.rcWork.bottom - h);
-    let p = CreateWindowExW(
-        WS_EX_TOOLWINDOW | WS_EX_TOPMOST,
+    let work = crate::windowing::work_area(MonitorFromWindow(u.hwnd, MONITOR_DEFAULTTONEAREST));
+    u.panel_left =
+        work.right - r.right < (248. * u.scale) as i32 && r.left - work.left > work.right - r.right;
+    u.panel_closing = false;
+    u.panel_motion.reset(0.);
+    u.panel_motion.set(1., if u.animate { 170 } else { 0 });
+    u.picker_scale = u.scale * 0.76;
+    u.picker = CreateWindowExW(
+        0,
         wide("Yami106Popup").as_ptr(),
         wide("Colour Picker").as_ptr(),
-        WS_POPUP,
-        x,
-        y,
-        w,
-        h,
+        WS_CHILD | WS_VISIBLE | WS_CLIPCHILDREN,
+        0,
+        0,
+        1,
+        1,
         u.hwnd,
         null_mut(),
         GetModuleHandleW(null()),
         null(),
     );
-    u.picker = p;
-    SetWindowRgn(p, CreateRoundRectRgn(0, 0, w + 1, h + 1, 18, 18), 1);
-    ShowWindow(p, SW_SHOW);
-    SetForegroundWindow(p);
-    SetFocus(p);
+    if u.picker.is_null() {
+        u.panel_motion.reset(0.);
+        pause(u, false);
+        return;
+    }
+    u.hex_edit = CreateWindowExW(
+        0,
+        wide("EDIT").as_ptr(),
+        wide(&u.hex).as_ptr(),
+        WS_CHILD | WS_TABSTOP | 0x0080,
+        0,
+        0,
+        1,
+        1,
+        u.picker,
+        801usize as HMENU,
+        GetModuleHandleW(null()),
+        null(),
+    );
+    if u.hex_edit.is_null() {
+        destroy_picker(u);
+        return;
+    }
+    u.hex_font = CreateFontW(
+        -(16. * u.picker_scale).round() as i32,
+        0,
+        0,
+        0,
+        400,
+        0,
+        0,
+        0,
+        1,
+        0,
+        0,
+        5,
+        0,
+        wide("Segoe UI").as_ptr(),
+    );
+    u.hex_font_scale = u.picker_scale;
+    SendMessageW(u.hex_edit, WM_SETFONT, u.hex_font as usize, 1);
+    SendMessageW(u.hex_edit, 0x00c5, 7, 0); // EM_SETLIMITTEXT
+    let old = SetWindowLongPtrW(u.hex_edit, GWLP_WNDPROC, hex_proc as *const () as isize);
+    if old == 0 {
+        destroy_picker(u);
+        return;
+    }
+    u.hex_original_proc = Some(std::mem::transmute::<
+        isize,
+        unsafe extern "system" fn(HWND, u32, WPARAM, LPARAM) -> LRESULT,
+    >(old));
+    u.hex_brush = CreateSolidBrush(0x00231919);
+    layout_panel(u);
+    SetTimer(u.hwnd, 5, 16, None);
 }
 unsafe fn commit(u: &mut Ui) {
     if let Some(c) = crate::config::parse(&u.hex) {
@@ -583,22 +810,38 @@ unsafe fn picker_point(u: &mut Ui, x: f32, y: f32, first: bool) {
     if u.drag != 0 {
         u.draft = render::hsv(u.h, u.s, u.v);
         u.hex = crate::config::hex(u.draft);
+        if !u.hex_edit.is_null() {
+            u.hex_syncing = true;
+            SetWindowTextW(u.hex_edit, wide(&u.hex).as_ptr());
+            u.hex_syncing = false;
+        }
         invalidate(u.picker);
     }
 }
 unsafe fn bind(u: &mut Ui, key: u16) {
     if let Some(which) = u.capture.take() {
         let key = if key == 27 { 0 } else { key };
+        if key != 0 {
+            let c = u.shared.control.lock().unwrap();
+            let other = if which == 0 {
+                c.config.hold
+            } else {
+                c.config.toggle
+            };
+            if !crate::input::binding_allowed(key) || key == other {
+                return;
+            }
+        }
         u.shared.change(|c| {
             match which {
                 0 => c.config.toggle = key,
                 1 => c.config.hold = key,
-                _ => c.config.output = key,
+                _ => (),
             }
             c.suspended = false;
             c.held = false;
         });
-        u.blocked = key;
+        u.blocked = if crate::input::down(key) { key } else { 0 };
         u.shared.save();
         invalidate(u.hwnd);
     }
@@ -634,7 +877,6 @@ unsafe fn raw(u: &mut Ui, l: LPARAM) {
             return;
         }
         let f = m.Anonymous.Anonymous.usButtonFlags;
-        let mut item = None;
         for (a, b, key) in [
             (1, 2, 1),
             (4, 8, 2),
@@ -643,21 +885,19 @@ unsafe fn raw(u: &mut Ui, l: LPARAM) {
             (256, 512, 6),
         ] {
             if f & a != 0 {
-                item = Some((key, true));
-                break;
+                raw_edge(u, key, true);
             }
             if f & b != 0 {
-                item = Some((key, false));
-                break;
+                raw_edge(u, key, false);
             }
         }
-        let Some(v) = item else {
-            return;
-        };
-        v
+        return;
     } else {
         return;
     };
+    raw_edge(u, key, down);
+}
+unsafe fn raw_edge(u: &mut Ui, key: u16, down: bool) {
     if key == 0 || key > 254 {
         return;
     }
@@ -679,22 +919,52 @@ unsafe fn raw(u: &mut Ui, l: LPARAM) {
         }
         return;
     }
-    if u.capture.is_some() {
-        if down {
-            if key == 1 {
+    if let Some(index) = u.capture {
+        if down && key == 27 {
+            bind(u, key);
+            return;
+        }
+        if key == 1 {
+            if down {
                 let mut p = POINT { x: 0, y: 0 };
                 GetCursorPos(&mut p);
                 ScreenToClient(u.hwnd, &mut p);
-                let index = u.capture.unwrap();
                 if !hit(p.x as f32 / u.scale, p.y as f32 / u.scale, bindings(index)) {
                     u.capture = None;
+                    u.capture_candidate = None;
                     pause(u, false);
                     invalidate(u.hwnd);
-                    return;
                 }
-                u.swallow = true;
             }
-            bind(u, key);
+            return;
+        }
+        if down {
+            let other = {
+                let c = u.shared.control.lock().unwrap();
+                if index == 0 {
+                    c.config.hold
+                } else {
+                    c.config.toggle
+                }
+            };
+            let held = (1..255)
+                .filter(|k| u.pressed[*k as usize] || crate::input::down(*k as u16))
+                .map(|k| k as u16);
+            if u.capture_candidate.is_some() && u.capture_candidate != Some(key) {
+                u.capture_invalid = true;
+            }
+            if !crate::input::binding_pair_allowed(key, other, held) {
+                u.capture_invalid = true;
+            }
+            if u.capture_candidate.is_none() {
+                u.capture_candidate = Some(key);
+            }
+        } else if u.capture_candidate == Some(key) {
+            if !u.capture_invalid {
+                bind(u, key);
+            }
+            u.capture_candidate = None;
+            u.capture_invalid = false;
         }
         return;
     }
@@ -763,7 +1033,13 @@ unsafe fn screen_pick_tick(u: &mut Ui) {
         return;
     }
     let foreground = GetForegroundWindow();
-    if foreground != u.screen_pick_previous_focus && !foreground.is_null() {
+    if u.screen_pick_started.elapsed().as_millis() < 150 {
+        let mut pid = 0;
+        GetWindowThreadProcessId(foreground, &mut pid);
+        if !foreground.is_null() && pid != GetCurrentProcessId() {
+            u.screen_pick_previous_focus = foreground;
+        }
+    } else if foreground != u.screen_pick_previous_focus && !foreground.is_null() {
         finish_screen_pick(u, false, false);
         return;
     }
@@ -816,7 +1092,6 @@ unsafe fn begin_screen_pick(u: &mut Ui, kind: ScreenPick) {
     }
     u.capture = None;
     u.radius_focus = false;
-    u.tolerance_focus = false;
     u.pending_pick = None;
     u.selection_point = None;
     u.sample_point = None;
@@ -826,6 +1101,8 @@ unsafe fn begin_screen_pick(u: &mut Ui, kind: ScreenPick) {
         ShowWindow(u.picker, SW_HIDE);
     }
     ShowWindow(u.hwnd, SW_HIDE);
+    crate::windowing::flush_hidden_windows();
+    u.screen_pick_started = std::time::Instant::now();
     u.screen_pick_previous_focus = GetForegroundWindow();
     u.screen_pick = Some(kind);
     u.marker = crate::calibration::Marker::new(u.hwnd, kind == ScreenPick::Colour);
@@ -937,6 +1214,9 @@ unsafe fn finish_screen_pick(u: &mut Ui, accept: bool, restore_focus: bool) {
                     if at == (p.x, p.y) {
                         u.draft = rgb;
                         u.hex = crate::config::hex(rgb);
+                        if !u.hex_edit.is_null() {
+                            SetWindowTextW(u.hex_edit, wide(&u.hex).as_ptr());
+                        }
                         (u.h, u.s, u.v) = render::to_hsv(rgb);
                         u.shared.change(|c| c.config.rgb = rgb);
                         u.shared.save();
@@ -960,8 +1240,12 @@ unsafe fn finish_screen_pick(u: &mut Ui, accept: bool, restore_focus: bool) {
         } else {
             u.hwnd
         };
-        SetForegroundWindow(target);
-        SetFocus(target);
+        SetForegroundWindow(u.hwnd);
+        SetFocus(if !u.hex_edit.is_null() {
+            u.hex_edit
+        } else {
+            target
+        });
     }
     invalidate(u.hwnd);
     if !u.picker.is_null() {
@@ -978,6 +1262,28 @@ unsafe extern "system" fn calibration_proc(hwnd: HWND, msg: u32, w: WPARAM, l: L
     DefWindowProcW(hwnd, msg, w, l)
 }
 unsafe fn clean_shutdown(u: &mut Ui) {
+    if u.shutting_down || u.closing.is_some() {
+        return;
+    }
+    finish_screen_pick(u, false, false);
+    pause(u, true);
+    u.shared.running.store(false, Ordering::Release);
+    u.shared.wake.notify_all();
+    if IsWindowVisible(u.hwnd) == 0 {
+        destroy_app(u);
+        return;
+    }
+    if !u.confirm.is_null() {
+        let dialog = u.confirm;
+        u.confirm = null_mut();
+        DestroyWindow(dialog);
+    }
+    EnableWindow(u.hwnd, 0);
+    KillTimer(u.hwnd, 2);
+    u.closing = Some(std::time::Instant::now());
+    SetTimer(u.hwnd, 5, 16, None);
+}
+unsafe fn destroy_app(u: &mut Ui) {
     if u.shutting_down {
         return;
     }
@@ -995,9 +1301,7 @@ unsafe fn clean_shutdown(u: &mut Ui) {
         DestroyWindow(dialog);
     }
     if !u.picker.is_null() {
-        let picker = u.picker;
-        u.picker = null_mut();
-        DestroyWindow(picker);
+        destroy_picker(u);
     }
     crate::tray::remove(u.hwnd);
     KillTimer(u.hwnd, 1);
@@ -1029,7 +1333,6 @@ unsafe fn request_exit(u: &mut Ui) {
     }
     u.capture = None;
     u.radius_focus = false;
-    u.tolerance_focus = false;
     pause(u, true);
     suppress_held(u);
     u.confirm_exit_selected = false;
@@ -1142,7 +1445,6 @@ unsafe fn hide_to_tray(u: &mut Ui) {
     }
     u.capture = None;
     u.radius_focus = false;
-    u.tolerance_focus = false;
     pause(u, false);
     suppress_held(u);
     ShowWindow(u.hwnd, SW_HIDE);
@@ -1157,17 +1459,8 @@ unsafe fn start_install(u: &mut Ui) {
 }
 unsafe fn apply_radius(u: &mut Ui) {
     if let Ok(value) = u.radius_text.parse::<u32>() {
-        if (1..=128).contains(&value) {
+        if (1..=8).contains(&value) {
             u.shared.change(|c| c.config.radius = value);
-            u.shared.save();
-        }
-    }
-    invalidate(u.hwnd);
-}
-unsafe fn apply_tolerance(u: &mut Ui) {
-    if let Ok(value) = u.tolerance_text.parse::<u32>() {
-        if value <= 16 {
-            u.shared.change(|c| c.config.tolerance = value);
             u.shared.save();
         }
     }
@@ -1223,9 +1516,32 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) ->
     }
     let picker = hwnd == u.picker;
     let s = if picker { u.picker_scale } else { u.scale };
-    let x = (l as i16) as f32 / s;
+    let x = (l as i16) as f32 / s
+        - if !picker && u.panel_left {
+            u.panel_extent_px as f32 / u.scale
+        } else {
+            0.
+        };
     let y = ((l >> 16) as i16) as f32 / s;
     match msg {
+        WM_COMMAND if picker && (w >> 16) & 0xffff == 0x0300 && l as HWND == u.hex_edit => {
+            let mut text = [0u16; 16];
+            let n = GetWindowTextW(u.hex_edit, text.as_mut_ptr(), 16);
+            u.hex = String::from_utf16_lossy(&text[..n as usize]);
+            if !u.hex_syncing {
+                if let Some(rgb) = crate::config::parse(&u.hex) {
+                    u.draft = rgb;
+                    (u.h, u.s, u.v) = render::to_hsv(rgb);
+                }
+            }
+            invalidate(u.picker);
+            0
+        }
+        WM_CTLCOLOREDIT if picker => {
+            SetTextColor(w as HDC, 0x00fff3f5);
+            SetBkColor(w as HDC, 0x00231919);
+            u.hex_brush as isize
+        }
         WM_ERASEBKGND => 1,
         WM_PAINT => {
             paint(u, hwnd);
@@ -1240,14 +1556,31 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) ->
                 close_picker(u);
             } else {
                 resize(u);
+                layout_panel(u);
             }
             0
         }
         WM_LBUTTONDOWN => {
+            u.pressed_ui = true;
+            SetTimer(u.hwnd, 5, 16, None);
             if picker {
+                if y < 40. && x < 250. {
+                    ReleaseCapture();
+                    let mut p = POINT { x: 0, y: 0 };
+                    GetCursorPos(&mut p);
+                    SendMessageW(
+                        u.hwnd,
+                        WM_NCLBUTTONDOWN,
+                        HTCAPTION as usize,
+                        ((p.x as u16 as usize) | ((p.y as u16 as usize) << 16)) as isize,
+                    );
+                    return 0;
+                }
                 u.hex_focus = hit(x, y, (20., 278., 208., 38.));
                 if u.hex_focus {
-                    u.select_all = true;
+                    SetFocus(u.hex_edit);
+                } else {
+                    SetFocus(u.picker);
                 }
                 picker_point(u, x, y, true);
                 if u.drag != 0 {
@@ -1255,7 +1588,11 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) ->
                 }
                 return 0;
             }
-            let (width, _) = dimensions(u);
+            let width = if u.payload.is_none() {
+                400.
+            } else {
+                dimensions(u).0
+            };
             if u.payload.is_none() && y < 54. && x < width - 100. {
                 ReleaseCapture();
                 let mut position = POINT { x: 0, y: 0 };
@@ -1267,6 +1604,7 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) ->
         }
         WM_MOUSEMOVE => {
             u.hover = Some((x, y));
+            SetTimer(u.hwnd, 5, 16, None);
             let mut tracking = TRACKMOUSEEVENT {
                 cbSize: std::mem::size_of::<TRACKMOUSEEVENT>() as u32,
                 dwFlags: TME_LEAVE,
@@ -1282,13 +1620,22 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) ->
             }
             0
         }
+        WM_CAPTURECHANGED | WM_CANCELMODE | WM_NCLBUTTONUP => {
+            u.pressed_ui = false;
+            SetTimer(u.hwnd, 5, 16, None);
+            0
+        }
         0x02a3 => {
             // WM_MOUSELEAVE (SDK constant outside the enabled bindings)
             u.hover = None;
+            u.pressed_ui = false;
+            SetTimer(u.hwnd, 5, 16, None);
             invalidate(hwnd);
             0
         }
         WM_LBUTTONUP => {
+            u.pressed_ui = false;
+            SetTimer(u.hwnd, 5, 16, None);
             if u.swallow {
                 u.swallow = false;
                 return 0;
@@ -1331,27 +1678,22 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) ->
             match u.view {
                 View::Main => {
                     if hit(x, y, (20., 360., 356., 52.)) {
+                        close_picker(u);
                         u.view = View::Settings;
+                        u.page_motion.reset(0.);
+                        u.page_motion.set(1., if u.animate { 160 } else { 0 });
+                        SetTimer(u.hwnd, 5, 16, None);
                         u.radius_text = u.shared.control.lock().unwrap().config.radius.to_string();
-                        u.tolerance_text = u
-                            .shared
-                            .control
-                            .lock()
-                            .unwrap()
-                            .config
-                            .tolerance
-                            .to_string();
-                        pause(u, false);
+                        pause(u, !u.picker.is_null());
                         invalidate(u.hwnd);
                     } else if hit(x, y, (232., 184., 148., 46.)) {
                         open_picker(u);
                     }
                 }
                 View::Settings => {
-                    if hit(x, y, (314., 320., 62., 30.)) {
+                    if hit(x, y, (240., 292., 136., 36.)) {
                         u.radius_focus = true;
                         u.select_all = true;
-                        u.tolerance_focus = false;
                         pause(u, true);
                         invalidate(hwnd);
                         return 0;
@@ -1360,29 +1702,21 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) ->
                         u.radius_focus = false;
                         pause(u, false);
                     }
-                    if hit(x, y, (90., 320., 62., 30.)) {
-                        u.radius_focus = false;
-                        u.tolerance_focus = true;
-                        u.select_all = true;
-                        pause(u, true);
-                        invalidate(hwnd);
-                        return 0;
-                    }
-                    if u.tolerance_focus {
-                        u.radius_focus = false;
-                        u.tolerance_focus = false;
-                        pause(u, false);
-                    }
                     if hit(x, y, (0., 56., 400., 42.)) {
                         u.capture = None;
                         pause(u, false);
                         u.view = View::Main;
+                        u.page_motion.reset(0.);
+                        u.page_motion.set(1., if u.animate { 160 } else { 0 });
+                        SetTimer(u.hwnd, 5, 16, None);
                         invalidate(u.hwnd);
                     } else {
                         let mut bound = false;
-                        for i in 0..3 {
+                        for i in 0..2 {
                             if hit(x, y, bindings(i)) {
                                 u.capture = Some(i);
+                                u.capture_candidate = None;
+                                u.capture_invalid = false;
                                 pause(u, true);
                                 bound = true;
                                 break;
@@ -1395,6 +1729,15 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) ->
                             }
                             if hit(x, y, (318., 370., 64., 36.)) {
                                 u.shared.change(|c| c.config.fixed = !c.config.fixed);
+                                u.toggle_motion.set(
+                                    if u.shared.control.lock().unwrap().config.fixed {
+                                        1.
+                                    } else {
+                                        0.
+                                    },
+                                    if u.animate { 150 } else { 0 },
+                                );
+                                SetTimer(u.hwnd, 5, 16, None);
                                 u.shared.save();
                                 invalidate(u.hwnd);
                             } else if u.shared.control.lock().unwrap().config.fixed
@@ -1446,70 +1789,11 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) ->
                 }
                 return 0;
             }
-            if !picker && u.tolerance_focus {
-                if w == 8 {
-                    if u.select_all {
-                        u.tolerance_text.clear();
-                        u.select_all = false;
-                    } else {
-                        u.tolerance_text.pop();
-                    }
-                    apply_tolerance(u);
-                } else if w == 13 || w == 27 {
-                    u.radius_focus = false;
-                    u.tolerance_focus = false;
-                    u.tolerance_text = u
-                        .shared
-                        .control
-                        .lock()
-                        .unwrap()
-                        .config
-                        .tolerance
-                        .to_string();
-                    pause(u, false);
-                    invalidate(hwnd);
-                }
-                return 0;
-            }
             if picker {
                 if w == 27 {
                     close_picker(u);
                 } else if w == 13 {
                     commit(u);
-                } else if u.hex_focus && w == 8 {
-                    if u.select_all {
-                        u.hex.clear();
-                        u.select_all = false;
-                    } else {
-                        u.hex.pop();
-                    }
-                    invalidate(hwnd);
-                } else if u.hex_focus && w == 65 && crate::input::down(162) {
-                    u.select_all = true;
-                } else if u.hex_focus
-                    && w == 86
-                    && (crate::input::down(162) || crate::input::down(163))
-                {
-                    if OpenClipboard(hwnd) != 0 {
-                        let data = GetClipboardData(13);
-                        if !data.is_null() {
-                            let p = GlobalLock(data) as *const u16;
-                            if !p.is_null() {
-                                let mut n = 0;
-                                while *p.add(n) != 0 && n < 64 {
-                                    n += 1;
-                                }
-                                u.hex = String::from_utf16_lossy(std::slice::from_raw_parts(p, n));
-                                GlobalUnlock(data);
-                            }
-                        }
-                        CloseClipboard();
-                        if let Some(c) = crate::config::parse(&u.hex) {
-                            u.draft = c;
-                            (u.h, u.s, u.v) = render::to_hsv(c);
-                        }
-                        invalidate(hwnd);
-                    }
                 }
             } else if w == 27 && u.capture.is_some() {
                 bind(u, 27);
@@ -1519,7 +1803,7 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) ->
         WM_CHAR => {
             if !picker && u.radius_focus {
                 if let Some(ch) = char::from_u32(w as u32) {
-                    if ch.is_ascii_digit() && (u.select_all || u.radius_text.len() < 3) {
+                    if ch.is_ascii_digit() && (u.select_all || u.radius_text.len() < 1) {
                         if u.select_all {
                             u.radius_text.clear();
                             u.select_all = false;
@@ -1530,57 +1814,12 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) ->
                 }
                 return 0;
             }
-            if !picker && u.tolerance_focus {
-                if let Some(ch) = char::from_u32(w as u32) {
-                    if ch.is_ascii_digit() && (u.select_all || u.tolerance_text.len() < 2) {
-                        if u.select_all {
-                            u.tolerance_text.clear();
-                            u.select_all = false;
-                        }
-                        u.tolerance_text.push(ch);
-                        apply_tolerance(u);
-                    }
-                }
-                return 0;
-            }
-            if picker && u.hex_focus {
-                if let Some(c) = char::from_u32(w as u32) {
-                    if c == '#' || c.is_ascii_hexdigit() {
-                        if u.select_all {
-                            u.hex.clear();
-                            u.select_all = false;
-                        }
-                        if u.hex.len() < 7 {
-                            u.hex.push(c.to_ascii_uppercase());
-                        }
-                        if let Some(c) = crate::config::parse(&u.hex) {
-                            u.draft = c;
-                            (u.h, u.s, u.v) = render::to_hsv(c);
-                        }
-                        invalidate(hwnd);
-                    }
-                }
-            }
             0
         }
         WM_ACTIVATE => {
             if w as u16 == WA_INACTIVE as u16 && u.radius_focus {
                 u.radius_focus = false;
                 u.radius_text = u.shared.control.lock().unwrap().config.radius.to_string();
-                pause(u, false);
-                invalidate(u.hwnd);
-            }
-            if w as u16 == WA_INACTIVE as u16 && u.tolerance_focus {
-                u.radius_focus = false;
-                u.tolerance_focus = false;
-                u.tolerance_text = u
-                    .shared
-                    .control
-                    .lock()
-                    .unwrap()
-                    .config
-                    .tolerance
-                    .to_string();
                 pause(u, false);
                 invalidate(u.hwnd);
             }
@@ -1592,6 +1831,51 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) ->
             0
         }
         WM_TIMER => {
+            if w == 5 {
+                if let Some(start) = u.closing {
+                    let t = if u.animate {
+                        (start.elapsed().as_secs_f32() / 0.15).clamp(0., 1.)
+                    } else {
+                        1.
+                    };
+                    SetLayeredWindowAttributes(u.hwnd, 0, ((1. - t) * 255.) as u8, LWA_ALPHA);
+                    if t >= 1. {
+                        KillTimer(u.hwnd, 5);
+                        destroy_app(u);
+                    }
+                    return 0;
+                }
+                if !u.picker.is_null() {
+                    if u.panel_motion.active()
+                        || (248. * u.scale * u.panel_motion.value()).round() as i32
+                            != u.panel_extent_px
+                    {
+                        layout_panel(u);
+                    }
+                    if !u.panel_motion.active()
+                        && !u.panel_closing
+                        && !u.hex_edit.is_null()
+                        && IsWindowVisible(u.hex_edit) == 0
+                    {
+                        ShowWindow(u.hex_edit, SW_SHOW);
+                    }
+                    if u.panel_closing && !u.panel_motion.active() {
+                        destroy_picker(u);
+                    }
+                }
+                invalidate(u.hwnd);
+                let active = u.page_motion.active()
+                    || u.toggle_motion.active()
+                    || u.panel_motion.active()
+                    || u.hover_motion.borrow().values().any(|m| m.active());
+                if !active {
+                    KillTimer(u.hwnd, 5);
+                    if !u.hex_edit.is_null() && !u.panel_closing {
+                        ShowWindow(u.hex_edit, SW_SHOW);
+                    }
+                }
+                return 0;
+            }
             if w == 2 {
                 u.fade.tick(u.hwnd);
                 return 0;
@@ -1736,7 +2020,7 @@ pub fn run(payload: Option<&'static [u8]>) {
                     hwnd = FindWindowW(wide("YamiMain").as_ptr(), null());
                 }
                 if !hwnd.is_null()
-                    && GetPropW(hwnd, wide("Yami.Build.106.PurpleRepair").as_ptr()).is_null()
+                    && GetPropW(hwnd, wide("Yami.Build.106.ClickRepair").as_ptr()).is_null()
                 {
                     MessageBoxW(null_mut(), wide("Another Yami version is still running. Exit it from its tray icon before starting this build.").as_ptr(), wide("Yami").as_ptr(), MB_OK | MB_ICONINFORMATION);
                 } else if !hwnd.is_null() {
@@ -1764,6 +2048,7 @@ pub fn run(payload: Option<&'static [u8]>) {
             cursor_hide_calls: 0,
             screen_pick: None,
             screen_pick_previous_focus: null_mut(),
+            screen_pick_started: std::time::Instant::now(),
             screen_pick_was_picker: false,
             mouse_hook: null_mut(),
             keyboard_hook: null_mut(),
@@ -1781,15 +2066,37 @@ pub fn run(payload: Option<&'static [u8]>) {
             progress_tick: std::time::Instant::now(),
             pending_launch: None,
             radius_focus: false,
-            radius_text: "12".into(),
-            tolerance_focus: false,
-            tolerance_text: "2".into(),
+            radius_text: "2".into(),
             hover: None,
+            pressed_ui: false,
+            animate: crate::windowing::animations_enabled(),
+            hover_motion: std::cell::RefCell::new(std::collections::HashMap::new()),
+            toggle_motion: crate::motion::Tween::new(
+                if shared.control.lock().unwrap().config.fixed {
+                    1.
+                } else {
+                    0.
+                },
+            ),
+            page_motion: crate::motion::Tween::new(1.),
+            panel_motion: crate::motion::Tween::new(0.),
+            panel_closing: false,
+            panel_left: false,
+            panel_extent_px: 0,
+            closing: None,
+            hex_edit: null_mut(),
+            hex_syncing: false,
+            hex_font: null_mut(),
+            hex_font_scale: 0.,
+            hex_brush: null_mut(),
+            hex_original_proc: None,
             scale: 1.,
             picker_scale: 1.,
             view,
             shared: shared.clone(),
             capture: None,
+            capture_candidate: None,
+            capture_invalid: false,
             blocked: 0,
             pressed: [false; 256],
             draft: 0xffffff,
@@ -1861,7 +2168,7 @@ pub fn run(payload: Option<&'static [u8]>) {
                 "Yami"
             })
             .as_ptr(),
-            WS_POPUP | WS_SYSMENU | WS_MINIMIZEBOX,
+            WS_POPUP | WS_SYSMENU | WS_MINIMIZEBOX | WS_CLIPCHILDREN,
             work.left + 10,
             work.top + 10,
             360,

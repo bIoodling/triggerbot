@@ -1,0 +1,109 @@
+# Yami — Final UI Polish and Triggerbot Engine Repair
+
+**Repository:** https://github.com/bIoodling/triggerbot
+
+Use the seven attached images as visual references. Images 1–2 show the current interface, image 3 shows the oversized calibration cursor, images 4–6 show the desired replacement designs, and image 7 shows the current keybind field styling.
+
+**The biggest priority is fixing the triggerbot itself.** The UI looks reasonably close to what I want, but the actual detection and output system still isn't working.
+
+## 1. UI fixes
+
+Keep the current compact black-and-purple theme, but make the following changes:
+
+- **Colour picker:** Combine the main window and colour picker into one draggable window, with two panels side by side when the picker is open. The picker should be significantly smaller, with no separate floating window. Both panels must move together.
+- **HEX input:** Add a proper blinking text caret, selection highlighting, keyboard navigation, Backspace, Delete and Ctrl+V. It must behave like a normal text field.
+- **Keybind instructions:** Move "Press Esc to unbind a key" directly below the **Keybinds** heading, above the actual keybind fields.
+- **Remove RGB ±:** Completely remove the visible RGB tolerance setting and its textbox. Keep a sensible internal tolerance for colour matching.
+- **Back button:** Remove the mismatched background strip behind the Back arrow and text. It should blend seamlessly into the rest of the Settings page.
+- **Calibration cursor:** Replace the current huge, bulky glowing crosshair with a small, thin, sharp red X, similar to image 4. Keep it centred on the cursor with no black background or screen flashing.
+- **Eyedropper icon:** Replace the current pickaxe-looking icon with a clean, minimal pen/stylus icon like image 5.
+- **Settings icon:** Replace the existing gear with a simpler, thinner outline gear like image 6.
+- **Alignment:** Fix inconsistent text baselines, textbox alignment, margins, padding, borders and control heights throughout the entire UI.
+- **Window behaviour:** Keep Main and Settings the same dimensions, centre the application on launch, maintain always-on-top behaviour and prevent window jumping.
+
+## 2. Animations
+
+Add smooth, subtle animations without making the interface feel slow:
+
+- 150–200 ms fade-in when opening Yami.
+- Smooth transitions between Main and Settings.
+- 150 ms hover and pressed-state transitions.
+- Smooth sliding toggle animation.
+- Colour picker panel expands horizontally with a subtle fade.
+- Short fade-out when closing.
+- No flickering, resizing glitches, jitter or unnecessary redraws.
+
+The colour picker must remain attached to the main panel throughout its animation.
+
+## 3. Fix the actual triggerbot
+
+The detection engine currently doesn't work reliably. Investigate and repair the entire Rust capture, colour-matching and input pipeline rather than applying superficial fixes.
+
+**When Fixed Point is OFF:**
+
+Monitor a very small pixel region directly underneath the current mouse cursor.
+
+**When Fixed Point is ON:**
+
+Monitor only the small pixel region at the user's calibrated location.
+
+In both modes:
+
+- Detect any user-selected 24-bit RGB/HEX colour, not just red.
+- Use a small detection region to minimise unnecessary processing.
+- Process fresh captured frames as quickly as practical.
+- Immediately dispatch a **left mouse click** when the configured colour first appears while Hold is active.
+- Fire only once per continuous colour appearance.
+- Rearm when the colour disappears.
+- Continue detecting while other keyboard keys are held, including WASD.
+- Ensure ordinary keyboard activity does not block the detection loop or mouse output.
+- Recover correctly from capture interruptions and resolution changes.
+
+**Latency goal:** Minimise measured detection-to-click latency, aiming for approximately 1 ms where technically achievable. Do not use `0 ms` polling or promise sub-1ms end-to-end performance without measurement; Windows scheduling, display refresh and screen capture impose real limits.
+
+Remove the output-key setting entirely. **Left mouse click is now the only output action**, so the UI should only contain Toggle and Hold keybinds.
+
+## 4. Keybind safety
+
+Implement proper keybind validation and display.
+
+- Allow normal individual keyboard keys.
+- Allow Mouse Button 4 and Mouse Button 5 (thumb buttons).
+- Display these clearly as `Mouse 4` and `Mouse 5`.
+- Disallow left and right mouse buttons.
+- Disallow the Windows keys and system-reserved combinations.
+- Reject simultaneous multi-key combinations.
+- Escape clears the selected binding.
+- Prevent duplicate Toggle and Hold bindings.
+- Correctly capture thumb-button presses without activating unrelated controls.
+- Ensure the binding system never interferes with ordinary keyboard input.
+
+## 5. Calibration
+
+Fix the calibration overlay completely.
+
+The marker should resemble the small red X in image 4, not the thick glowing plus in image 3.
+
+Hide Yami during calibration, show the small marker, confirm with left-click and cancel with Escape. Restore the normal cursor and UI afterward.
+
+No black-screen flashing, duplicate cursors, stuck overlays or incorrect coordinates.
+
+## 6. Testing and delivery
+
+Before calling this complete:
+
+1. Test RGB detection with several colours, including red, green, blue, white and custom HEX values.
+2. Test both cursor and Fixed Point detection.
+3. Verify that detection produces an actual left mouse click.
+4. Verify one click per continuous appearance and correct rearming.
+5. Test detection while holding WASD and other keys.
+6. Test Mouse 4/5 bindings and invalid-key rejection.
+7. Verify colour picker text editing, window dragging and animations.
+8. Verify calibration has no black flashing.
+9. Build the Windows release successfully.
+
+Use automated tests and a controlled Windows test environment wherever possible. Do not claim live Roblox functionality has been verified without actually testing it.
+
+Commit the complete changes to GitHub and provide the updated source and Windows installer.
+
+**Do not deliver another cosmetic-only build. Fix the detection engine first, then complete the UI polish and animations.**

@@ -23,6 +23,7 @@ extern "system" {
     fn GdipSetSmoothingMode(g: P, m: i32) -> i32;
     fn GdipSetTextRenderingHint(g: P, m: i32) -> i32;
     fn GdipScaleWorldTransform(g: P, x: f32, y: f32, o: i32) -> i32;
+    fn GdipTranslateWorldTransform(g: P, x: f32, y: f32, order: i32) -> i32;
     fn GdipGraphicsClear(g: P, c: u32) -> i32;
     fn GdipCreatePath(mode: i32, p: *mut P) -> i32;
     fn GdipAddPathArc(p: P, x: f32, y: f32, w: f32, h: f32, start: f32, sweep: f32) -> i32;
@@ -208,24 +209,33 @@ impl Canvas {
             GdipDeleteBrush(b);
         }
     }
+    pub fn translate(&self, x: f32, y: f32) {
+        unsafe {
+            GdipTranslateWorldTransform(self.g, x, y, 0);
+        }
+    }
     pub fn close(&self, x: f32, y: f32) {
         self.line(x - 6., y - 6., x + 6., y + 6., TEXT, 1.3);
         self.line(x + 6., y - 6., x - 6., y + 6., TEXT, 1.3);
     }
+    pub fn pen(&self, x: f32, y: f32) {
+        self.line(x - 5., y + 5., x + 3., y - 3., TEXT, 3.);
+        self.line(x + 5., y - 5., x + 8., y - 8., TEXT, 3.);
+        self.line(x - 8., y + 8., x - 6., y + 6., TEXT, 1.2);
+    }
     pub fn gear(&self, x: f32, y: f32) {
-        self.circle(x, y, 8., BG, TEXT);
-        self.circle(x, y, 3., BG, TEXT);
-        for i in 0..8 {
-            let a = i as f32 * std::f32::consts::PI / 4.;
-            self.line(
-                x + 8. * a.cos(),
-                y + 8. * a.sin(),
-                x + 11. * a.cos(),
-                y + 11. * a.sin(),
-                TEXT,
-                2.,
-            );
+        // Six shallow, rounded teeth drawn as one thin continuous outline.
+        let mut last = None;
+        for i in 0..=96 {
+            let a = i as f32 * std::f32::consts::TAU / 96.;
+            let r = 9.3 + 1.1 * (6. * a).cos();
+            let p = (x + r * a.cos(), y + r * a.sin());
+            if let Some((px, py)) = last {
+                self.line(px, py, p.0, p.1, TEXT, 1.35);
+            }
+            last = Some(p);
         }
+        self.circle(x, y, 3.6, 0, TEXT);
     }
 }
 impl Drop for Canvas {

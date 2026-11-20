@@ -53,24 +53,7 @@ impl Fade {
         Self { start: None }
     }
     pub unsafe fn show(&mut self, hwnd: HWND) {
-        let mut enabled = 0i32;
-        let ok = SystemParametersInfoW(
-            SPI_GETCLIENTAREAANIMATION,
-            0,
-            (&mut enabled as *mut i32).cast(),
-            0,
-        ) != 0;
-        let mut animation = ANIMATIONINFO {
-            cbSize: std::mem::size_of::<ANIMATIONINFO>() as u32,
-            iMinAnimate: 0,
-        };
-        let animation_ok = SystemParametersInfoW(
-            SPI_GETANIMATION,
-            animation.cbSize,
-            (&mut animation as *mut ANIMATIONINFO).cast(),
-            0,
-        ) != 0;
-        let animate = ok && enabled != 0 && animation_ok && animation.iMinAnimate != 0;
+        let animate = animations_enabled();
         SetLayeredWindowAttributes(hwnd, 0, if animate { 0 } else { 255 }, LWA_ALPHA);
         ShowWindow(hwnd, SW_SHOW);
         UpdateWindow(hwnd);
@@ -90,4 +73,34 @@ impl Fade {
             }
         }
     }
+}
+
+pub unsafe fn animations_enabled() -> bool {
+    let mut enabled = 0i32;
+    let ok = SystemParametersInfoW(
+        SPI_GETCLIENTAREAANIMATION,
+        0,
+        (&mut enabled as *mut i32).cast(),
+        0,
+    ) != 0;
+    let mut animation = ANIMATIONINFO {
+        cbSize: std::mem::size_of::<ANIMATIONINFO>() as u32,
+        iMinAnimate: 0,
+    };
+    let animation_ok = SystemParametersInfoW(
+        SPI_GETANIMATION,
+        animation.cbSize,
+        (&mut animation as *mut ANIMATIONINFO).cast(),
+        0,
+    ) != 0;
+    ok && enabled != 0 && animation_ok && animation.iMinAnimate != 0
+}
+
+#[link(name = "dwmapi")]
+extern "system" {
+    fn DwmFlush() -> i32;
+}
+/// Wait for the hide transaction before requesting a screen colour sample.
+pub unsafe fn flush_hidden_windows() {
+    let _ = DwmFlush();
 }

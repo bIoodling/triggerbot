@@ -1,3 +1,9 @@
+# Latest revision — 2026-11-20
+
+The active [Rust application](rust/README.md) now uses fixed left-click output and a compact attached picker. Read the [current findings and verification limits](rust/CLICK-REPAIR-2026-11-20.md). The app and installer compile and ten headless checks pass; live Roblox and UI behaviour remain unverified. Older descriptions below are historical.
+
+---
+
 # Yami v1.0.6 — current Rust source
 
 The active application is in [rust/](rust/README.md). See [latest repair findings and verification limits](rust/ENGINE-REPAIR-2026-11-19.md) before treating the build as gameplay verified. The latest UI uses a fixed 400 × 420 purple design.

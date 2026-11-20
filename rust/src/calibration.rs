@@ -1,4 +1,4 @@
-//! A single 32x32 premultiplied-alpha marker; never a fullscreen paint surface.
+//! A single 18x18 premultiplied-alpha marker; never a fullscreen paint surface.
 use std::ptr::{null, null_mut};
 use windows_sys::Win32::{
     Foundation::*, Graphics::Gdi::*, System::LibraryLoader::*, UI::WindowsAndMessaging::*,
@@ -17,14 +17,14 @@ impl Marker {
     pub unsafe fn new(owner: HWND, preview: bool) -> Option<Self> {
         let mut p = POINT { x: 0, y: 0 };
         GetCursorPos(&mut p);
-        let (width, height) = if preview { (42, 30) } else { (32, 32) };
+        let (width, height) = if preview { (42, 30) } else { (18, 18) };
         let hwnd = CreateWindowExW(
             WS_EX_LAYERED | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE | WS_EX_TRANSPARENT | WS_EX_TOPMOST,
             crate::wide("Yami106Calibration").as_ptr(),
             crate::wide("Yami calibration").as_ptr(),
             WS_POPUP,
-            p.x - 16,
-            p.y - 16,
+            p.x - width / 2,
+            p.y - height / 2,
             width,
             height,
             owner,
@@ -64,19 +64,19 @@ impl Marker {
         let pixels = std::slice::from_raw_parts_mut(bits as *mut u32, (width * height) as usize);
         pixels.fill(0);
         if !preview {
-            for y in 0..32 {
-                for x in 0..32 {
-                    let dx = x as f32 - 15.5;
+            for y in 0..18 {
+                for x in 0..18 {
+                    let dx = x as f32 - 8.5;
                     let dy = y as f32 - 15.5;
-                    // Antialiased premultiplied-alpha red X with a restrained halo.
+                    // Antialiased premultiplied-alpha red X with a thin sharp stroke.
                     let distance = (dx.abs() - dy.abs()).abs() * std::f32::consts::FRAC_1_SQRT_2;
                     let extent = dx.abs().max(dy.abs());
-                    let end = ((13.5 - extent) / 2.).clamp(0., 1.);
-                    let core = (1.5 - distance).clamp(0., 1.);
-                    let glow = 0.30 * (-distance * distance / 7.).exp();
+                    let end = ((7.5 - extent) / 1.).clamp(0., 1.);
+                    let core = (1.1 - distance).clamp(0., 1.);
+                    let glow = 0.;
                     let alpha = ((core.max(glow) * end) * 255.).round() as u32;
                     if alpha != 0 {
-                        pixels[y * 32 + x] = (alpha << 24)
+                        pixels[y * 18 + x] = (alpha << 24)
                             | (alpha << 16)
                             | ((57 * alpha / 255) << 8)
                             | (76 * alpha / 255);
@@ -133,8 +133,8 @@ impl Marker {
                 p.y - 20 - self.height
             };
         } else {
-            p.x -= 16;
-            p.y -= 16;
+            p.x -= self.width / 2;
+            p.y -= self.height / 2;
         }
         let size = SIZE {
             cx: self.width,

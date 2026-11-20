@@ -9,7 +9,6 @@ use std::{
 pub struct Config {
     pub toggle: u16,
     pub hold: u16,
-    pub output: u16,
     pub rgb: u32,
     pub fixed: bool,
     pub calibrated: bool,
@@ -26,15 +25,14 @@ impl Default for Config {
         Self {
             toggle: 0,
             hold: 0,
-            output: 0,
             rgb: 0xffffff,
             fixed: false,
             calibrated: false,
             x: 0.5,
             y: 0.5,
             target_exe: String::new(),
-            radius: 12,
-            tolerance: 2,
+            radius: 2,
+            tolerance: 8,
             clear_ms: 8,
             clear_frames: 2,
         }
@@ -46,12 +44,20 @@ pub fn path() -> PathBuf {
         .join("settings.json")
 }
 pub fn load() -> Config {
-    let mut c: Config = fs::read(path())
+    let c: Config = fs::read(path())
         .ok()
         .and_then(|v| serde_json::from_slice(&v).ok())
         .unwrap_or_else(migrate);
+    normalize(c)
+}
+pub fn normalize(mut c: Config) -> Config {
     c.rgb &= 0xffffff;
-    c.radius = c.radius.clamp(1, 128);
+    c.target_exe = c.target_exe.to_ascii_lowercase();
+    c.radius = if (1..=8).contains(&c.radius) {
+        c.radius
+    } else {
+        2
+    };
     c.tolerance = c.tolerance.min(16);
     c.clear_ms = c.clear_ms.min(100);
     c.clear_frames = c.clear_frames.clamp(2, 16);
@@ -62,10 +68,19 @@ pub fn load() -> Config {
     }
     c.x = c.x.clamp(0., 1.);
     c.y = c.y.clamp(0., 1.);
-    for bind in [&mut c.toggle, &mut c.hold, &mut c.output] {
-        if *bind > 254 {
+    for bind in [&mut c.toggle, &mut c.hold] {
+        *bind = match *bind {
+            16 => 160,
+            17 => 162,
+            18 => 164,
+            other => other,
+        };
+        if !crate::input::binding_allowed(*bind) {
             *bind = 0;
         }
+    }
+    if c.toggle != 0 && c.toggle == c.hold {
+        c.toggle = 0;
     }
     c
 }
@@ -97,7 +112,6 @@ fn migrate() -> Config {
             match (section, key) {
                 ("Activation", "PrimaryVK") => c.toggle = value.parse().unwrap_or(0),
                 ("Activation", "HoldVK") => c.hold = value.parse().unwrap_or(0),
-                ("Output", "VK") => c.output = value.parse().unwrap_or(0),
                 ("Detector", "TargetRGB") => c.rgb = parse(value).unwrap_or(0xffffff),
                 ("Detection", "Cursorless") => c.fixed = value == "1",
                 ("Detection", "Calibrated") => c.calibrated = value == "1",
@@ -150,4 +164,45 @@ pub fn parse(s: &str) -> Option<u32> {
         return None;
     }
     u32::from_str_radix(s, 16).ok()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn previous_output_setting_is_ignored_and_invalid_binds_cannot_activate() {
+        let c: Config =
+            serde_json::from_str(r#"{"output":70,"toggle":1,"hold":69,"radius":12,"rgb":8073215}"#)
+                .unwrap();
+        let c = normalize(c);
+        assert_eq!(c.toggle, 0);
+        assert_eq!(c.hold, 69);
+        assert_eq!(c.radius, 2);
+        assert!(!serde_json::to_string(&c).unwrap().contains("output"));
+        let c = normalize(Config {
+            hold: 160,
+            toggle: 16,
+            ..Default::default()
+        });
+        assert_eq!(c.toggle, 0);
+        assert_eq!(c.hold, 160);
+    }
+    #[test]
+    fn arbitrary_hex_roundtrips_without_filesystem_access() {
+        for rgb in [
+            0xff0000, 0x00ff00, 0x0000ff, 0xffffff, 0, 0x7b2fff, 0x123456,
+        ] {
+            let c = Config {
+                rgb,
+                ..Default::default()
+            };
+            let bytes = serde_json::to_vec(&c).unwrap();
+            let restored: Config = serde_json::from_slice(&bytes).unwrap();
+            assert_eq!(restored.rgb, rgb);
+            assert_eq!(parse(&hex(rgb)), Some(rgb));
+        }
+        for invalid in ["#FFF", "#00GG00", "#1234567", "-000001"] {
+            assert_eq!(parse(invalid), None);
+        }
+    }
 }
