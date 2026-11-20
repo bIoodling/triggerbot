@@ -1,3 +1,14 @@
+# 2026-11-20 — native AHK-style engine
+
+- Replaced DXGI/shader matching with small-region GDI bulk capture and early-exit Rust scanning.
+- Restored default25x25 square/radius12; retained arbitrary RGB and internal tolerance.
+- Added explicit waiting/detected/clicked/clear states, process-wide worker ownership and Hold-only enabled default when Toggle is unbound.
+- Added separate high-resolution capture/match/SendInput timing and between-pass backpressure; no fake nanosecond timer or120ms first-click delay.
+- Preserved UI, picker, animations and installer; removed unused Direct3D dependency.
+-19 noninteractive tests pass; actual desktop/receiver test remains ignored. Live game behaviour and real dispatch latency are unverified.
+
+--- Earlier revisions ---
+
 # 2026-11-20 — left-click engine and attached picker
 
 - Fixed left-click output; removed output binding/configuration and obsolete activation gate.

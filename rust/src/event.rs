@@ -3,8 +3,9 @@ use std::time::Duration;
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Phase {
     Idle,
-    Armed,
-    Fired,
+    Waiting,
+    Detected,
+    Clicked,
     WaitingForClear,
 }
 pub struct Latch {
@@ -21,37 +22,42 @@ impl Latch {
         }
     }
     pub fn reset(&mut self, active: bool) {
-        self.phase = if active { Phase::Armed } else { Phase::Idle };
+        self.phase = if active { Phase::Waiting } else { Phase::Idle };
         self.invalidate_clear();
     }
     pub fn invalidate_clear(&mut self) {
         self.clear_since = None;
         self.clear_observations = 0;
     }
-    // Call only after a fresh GPU result or a successful DXGI timeout that
-    // confirms the identical cached ROI is unchanged. Errors are not absence.
+    // Only a completed current screen capture can enter this state machine.
+    // Capture failure is not a false result and never counts toward clearing.
     pub fn observe(&mut self, found: bool, now: Duration, count: u32, delay: Duration) -> bool {
         if self.phase == Phase::Idle {
             return false;
         }
         if found {
             self.invalidate_clear();
-            if self.phase == Phase::Armed {
-                self.phase = Phase::Fired;
+            if self.phase == Phase::Waiting {
+                self.phase = Phase::Detected;
                 return true;
             }
         } else if self.phase == Phase::WaitingForClear {
             let since = *self.clear_since.get_or_insert(now);
             self.clear_observations = self.clear_observations.saturating_add(1);
             if self.clear_observations >= count.max(2) && now.saturating_sub(since) >= delay {
-                self.phase = Phase::Armed;
+                self.phase = Phase::Waiting;
                 self.invalidate_clear();
             }
         }
         false
     }
+    pub fn begin_click(&mut self) {
+        if self.phase == Phase::Detected {
+            self.phase = Phase::Clicked;
+        }
+    }
     pub fn dispatched(&mut self) {
-        if self.phase == Phase::Fired {
+        if self.phase == Phase::Detected || self.phase == Phase::Clicked {
             self.phase = Phase::WaitingForClear;
         }
     }
@@ -78,7 +84,7 @@ mod tests {
             assert!(!sample(&mut l, true, t));
         }
         assert!(!sample(&mut l, false, 20));
-        // An unchanged-desktop observation after the timeout completes clearing.
+        // A second independently captured absent sample completes clearing.
         assert!(!sample(&mut l, false, 28));
         assert!(sample(&mut l, true, 29));
         assert!(!sample(&mut l, true, 30));

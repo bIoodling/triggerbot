@@ -373,7 +373,7 @@ unsafe fn draw(u: &Ui, g: &Canvas, picker: bool) {
             let radius_valid = u
                 .radius_text
                 .parse::<u32>()
-                .map(|n| (1..=8).contains(&n))
+                .map(|n| (1..=128).contains(&n))
                 .unwrap_or(false);
             g.round(
                 240.,
@@ -1459,7 +1459,7 @@ unsafe fn start_install(u: &mut Ui) {
 }
 unsafe fn apply_radius(u: &mut Ui) {
     if let Ok(value) = u.radius_text.parse::<u32>() {
-        if (1..=8).contains(&value) {
+        if (1..=128).contains(&value) {
             u.shared.change(|c| c.config.radius = value);
             u.shared.save();
         }
@@ -1803,7 +1803,7 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) ->
         WM_CHAR => {
             if !picker && u.radius_focus {
                 if let Some(ch) = char::from_u32(w as u32) {
-                    if ch.is_ascii_digit() && (u.select_all || u.radius_text.len() < 1) {
+                    if ch.is_ascii_digit() && (u.select_all || u.radius_text.len() < 3) {
                         if u.select_all {
                             u.radius_text.clear();
                             u.select_all = false;
@@ -2020,7 +2020,7 @@ pub fn run(payload: Option<&'static [u8]>) {
                     hwnd = FindWindowW(wide("YamiMain").as_ptr(), null());
                 }
                 if !hwnd.is_null()
-                    && GetPropW(hwnd, wide("Yami.Build.106.ClickRepair").as_ptr()).is_null()
+                    && GetPropW(hwnd, wide("Yami.Build.106.NativeAHKScan").as_ptr()).is_null()
                 {
                     MessageBoxW(null_mut(), wide("Another Yami version is still running. Exit it from its tray icon before starting this build.").as_ptr(), wide("Yami").as_ptr(), MB_OK | MB_ICONINFORMATION);
                 } else if !hwnd.is_null() {
@@ -2066,7 +2066,7 @@ pub fn run(payload: Option<&'static [u8]>) {
             progress_tick: std::time::Instant::now(),
             pending_launch: None,
             radius_focus: false,
-            radius_text: "2".into(),
+            radius_text: "12".into(),
             hover: None,
             pressed_ui: false,
             animate: crate::windowing::animations_enabled(),

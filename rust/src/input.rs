@@ -34,15 +34,31 @@ pub fn route_key(c: &mut crate::trigger::Control, key: u16, pressed: bool) {
         }
     }
 }
-pub fn pointer_over(hwnd: usize) -> bool {
+pub fn point_over(hwnd: usize, point: (i32, i32)) -> bool {
     if hwnd == 0 {
         return false;
     }
     unsafe {
         use windows_sys::Win32::{Foundation::POINT, UI::WindowsAndMessaging::*};
-        let mut p = POINT { x: 0, y: 0 };
-        GetCursorPos(&mut p);
-        GetAncestor(WindowFromPoint(p), GA_ROOT) == hwnd as _
+        GetAncestor(
+            WindowFromPoint(POINT {
+                x: point.0,
+                y: point.1,
+            }),
+            GA_ROOT,
+        ) == hwnd as _
+    }
+}
+pub fn pointer_over(hwnd: usize) -> bool {
+    if hwnd == 0 {
+        return false;
+    }
+    unsafe {
+        let mut p = windows_sys::Win32::Foundation::POINT { x: 0, y: 0 };
+        if windows_sys::Win32::UI::WindowsAndMessaging::GetCursorPos(&mut p) == 0 {
+            return false;
+        }
+        point_over(hwnd, (p.x, p.y))
     }
 }
 pub fn down(v: u16) -> bool {
@@ -105,18 +121,38 @@ pub(crate) fn dispatch_click(mut insert: impl FnMut(&[INPUT]) -> u32) -> bool {
     }
     count == 2
 }
-pub fn click() -> bool {
+pub struct ClickTiming {
+    pub accepted: bool,
+    pub called: std::time::Instant,
+    pub returned: std::time::Instant,
+}
+pub fn click_timed() -> Option<ClickTiming> {
     release_pending();
     if PENDING_RELEASE.lock().unwrap().is_some() {
-        return false;
+        return None;
     }
-    dispatch_click(|inputs| unsafe {
-        SendInput(
+    let mut timing = None;
+    let accepted = dispatch_click(|inputs| unsafe {
+        let called = std::time::Instant::now();
+        let inserted = SendInput(
             inputs.len() as u32,
             inputs.as_ptr(),
             std::mem::size_of::<INPUT>() as i32,
-        )
+        );
+        let returned = std::time::Instant::now();
+        if timing.is_none() {
+            timing = Some((called, returned));
+        }
+        inserted
+    });
+    timing.map(|(called, returned)| ClickTiming {
+        accepted,
+        called,
+        returned,
     })
+}
+pub fn click() -> bool {
+    click_timed().map(|timing| timing.accepted).unwrap_or(false)
 }
 #[cfg(test)]
 mod tests {

@@ -7,6 +7,8 @@ use std::{
 #[derive(Clone, Serialize, Deserialize, PartialEq)]
 #[serde(default)]
 pub struct Config {
+    #[serde(default)]
+    pub engine_revision: u32,
     pub toggle: u16,
     pub hold: u16,
     pub rgb: u32,
@@ -23,6 +25,7 @@ pub struct Config {
 impl Default for Config {
     fn default() -> Self {
         Self {
+            engine_revision: 2,
             toggle: 0,
             hold: 0,
             rgb: 0xffffff,
@@ -31,9 +34,9 @@ impl Default for Config {
             x: 0.5,
             y: 0.5,
             target_exe: String::new(),
-            radius: 2,
+            radius: 12,
             tolerance: 8,
-            clear_ms: 8,
+            clear_ms: 0,
             clear_frames: 2,
         }
     }
@@ -53,11 +56,16 @@ pub fn load() -> Config {
 pub fn normalize(mut c: Config) -> Config {
     c.rgb &= 0xffffff;
     c.target_exe = c.target_exe.to_ascii_lowercase();
-    c.radius = if (1..=8).contains(&c.radius) {
-        c.radius
-    } else {
-        2
-    };
+    if c.engine_revision < 2 {
+        if c.radius == 2 {
+            c.radius = 12;
+        }
+        if c.clear_ms == 8 {
+            c.clear_ms = 0;
+        }
+        c.engine_revision = 2;
+    }
+    c.radius = c.radius.clamp(1, 128);
     c.tolerance = c.tolerance.min(16);
     c.clear_ms = c.clear_ms.min(100);
     c.clear_frames = c.clear_frames.clamp(2, 16);
@@ -177,7 +185,7 @@ mod tests {
         let c = normalize(c);
         assert_eq!(c.toggle, 0);
         assert_eq!(c.hold, 69);
-        assert_eq!(c.radius, 2);
+        assert_eq!(c.radius, 12);
         assert!(!serde_json::to_string(&c).unwrap().contains("output"));
         let c = normalize(Config {
             hold: 160,
@@ -204,5 +212,21 @@ mod tests {
         for invalid in ["#FFF", "#00GG00", "#1234567", "-000001"] {
             assert_eq!(parse(invalid), None);
         }
+    }
+    #[test]
+    fn ahk_radius_defaults_migrate_once_without_overriding_later_preferences() {
+        let old: Config = serde_json::from_str(r#"{"radius":2,"clear_ms":8,"hold":69}"#).unwrap();
+        let upgraded = normalize(old);
+        assert_eq!(upgraded.radius, 12);
+        assert_eq!(upgraded.clear_ms, 0);
+        assert_eq!(upgraded.engine_revision, 2);
+        let chosen = normalize(Config {
+            radius: 2,
+            ..Default::default()
+        });
+        assert_eq!(chosen.radius, 2);
+        let defaults = Config::default();
+        assert_eq!(defaults.radius * 2 + 1, 25);
+        assert_eq!(defaults.clear_frames, 2);
     }
 }

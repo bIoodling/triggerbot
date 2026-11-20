@@ -1,0 +1,160 @@
+# Yami — Ultra-Low-Latency Rust Triggerbot Engine
+
+**Repository:** https://github.com/bIoodling/triggerbot
+
+The triggerbot still isn't functioning. Replace the existing unreliable detection implementation with a native Rust translation of the AutoHotkey script I previously provided.
+
+Keep the existing UI, colour picker, animations and installer. Focus this revision on the detection engine.
+
+## 1. Maximum detection speed
+
+My requested scan interval is **1 nanosecond (0.000001 ms)**, with the primary goal of achieving **less than 1 ms between detecting a matching colour and dispatching the left mouse click**.
+
+Do not implement a fake nanosecond timer. Windows cannot reliably schedule desktop captures every nanosecond.
+
+Instead:
+
+- Use the fastest sustainable capture and processing loop.
+- Do not add an artificial 5 ms or 120 ms delay before the first click.
+- Process each fresh frame immediately.
+- Minimise the time between a confirmed colour match and `SendInput`.
+- Avoid unnecessary sleeps, allocations and thread handoffs on the critical path.
+- Never process an old frame as though it were a new detection.
+- Measure detection-to-`SendInput` latency using a high-resolution clock.
+- Aim for sub-1ms processing and dispatch where achievable, without falsely claiming sub-1ms screen-to-click latency.
+
+**The detection loop must prioritise responsiveness while avoiding wasteful CPU/GPU saturation.**
+
+## 2. Two detection modes — identical logic
+
+Both modes must use exactly the same scanning algorithm, colour comparison, activation checks and click logic.
+
+The only difference is the scan centre.
+
+### Fixed Point OFF — Cursor mode
+
+Continuously scan a small region centred on the current mouse cursor.
+
+- Read the cursor position.
+- Capture the surrounding pixels.
+- Compare them with the selected HEX colour.
+- Immediately click when a new matching colour is detected and activation conditions are satisfied.
+- Continue updating the scan position as the cursor moves.
+
+### Fixed Point ON — Calibrated mode
+
+Continuously scan a small region centred on the user's calibrated position.
+
+- Use the position selected during calibration.
+- Do not follow the mouse cursor.
+- Capture pixels around that fixed point.
+- Use the exact same colour detection and click logic as Cursor mode.
+- Correctly handle DPI scaling, window movement and resolution changes.
+
+**Both modes must be equally responsive.**
+
+## 3. Colour detection
+
+Support every valid `#RRGGBB` colour.
+
+Use the selected colour from Yami's colour picker.
+
+- Default scan radius: 12 pixels, matching the original AHK script.
+- Scan region: 25 × 25 pixels.
+- Use an efficient small-region capture rather than hundreds of individual pixel API calls.
+- Support internal RGB tolerance.
+- Correctly handle RGB/BGR/BGRA channel ordering.
+- Stop searching as soon as a matching pixel is found.
+- Never hardcode green-only detection.
+
+## 4. Absolutely no double-clicking
+
+**One continuous colour appearance must produce exactly one left mouse click.**
+
+Implement an explicit state machine:
+
+`WAITING → DETECTED → CLICKED → WAITING_FOR_CLEAR → WAITING`
+
+Rules:
+
+1. The first valid detection dispatches one left mouse click.
+2. The click consists of one mouse-down and one mouse-up event.
+3. Do not click again while the colour remains visible.
+4. Require the colour to disappear before rearming.
+5. Use a small configurable clear-frame threshold to prevent flickering pixels from causing duplicate clicks.
+6. Do not use a 120 ms cooldown as a delay before the initial click.
+7. Prevent concurrent capture workers from dispatching duplicate clicks.
+8. Reset the detection state correctly when switching modes or changing the target colour.
+
+## 5. Toggle and Hold must both work
+
+Keep both configurable bindings.
+
+**Toggle:**
+- Press once to enable the triggerbot.
+- Press again to disable it.
+- Ignore key-repeat events so holding the Toggle key does not rapidly switch states.
+
+**Hold:**
+- The detector may fire only while the configured Hold key is physically pressed.
+- Releasing Hold immediately prevents new clicks.
+- Re-pressing Hold restores eligibility.
+
+**Combined behaviour:**
+
+The triggerbot is allowed to click only when:
+
+`Toggle enabled AND Hold pressed AND target colour detected AND detector armed`
+
+If Toggle is unbound, provide a clearly defined default enabled state so Hold-only operation works.
+
+Normal keyboard activity, including WASD, must not interfere with detection or delay the click.
+
+Support Mouse 4 and Mouse 5 as Hold or Toggle bindings.
+
+Reject left/right mouse buttons, Windows keys, duplicate bindings and reserved combinations.
+
+## 6. Left mouse click only
+
+Remove the output-key binding permanently.
+
+Use native Windows `SendInput` to dispatch one left-button down/up pair.
+
+Do not inject keyboard output.
+
+Avoid duplicate click dispatches and ensure input resources are cleaned up correctly.
+
+## 7. Required verification
+
+Do not publish another installer based only on successful compilation.
+
+Test:
+
+- Cursor mode detecting a colour under the mouse.
+- Fixed Point mode detecting a colour at the calibrated position.
+- Arbitrary HEX colours.
+- Toggle enabling and disabling.
+- Hold activation and immediate release.
+- Toggle and Hold operating together.
+- Mouse 4/5 bindings.
+- WASD held during detection.
+- One click per continuous appearance.
+- Correct rearming after disappearance.
+- Actual left-click delivery to a controlled Windows test window.
+- Detection-to-input dispatch latency.
+
+Report measured latency separately from capture latency and display refresh latency.
+
+If interactive testing cannot be performed, state exactly which tests remain unverified.
+
+## 8. Delivery
+
+Commit the repaired engine to GitHub.
+
+Build the Windows release and installer.
+
+Preserve all existing UI fixes and animations.
+
+**Do not deliver another build until the detection logic, activation states and click dispatch have been tested as thoroughly as the environment permits.**
+
+The objective is a working, extremely responsive colour triggerbot with two reliable scan modes, functioning Toggle and Hold controls, and absolutely no duplicate clicks from a continuously visible target.

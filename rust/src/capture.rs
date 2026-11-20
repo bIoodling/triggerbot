@@ -50,9 +50,11 @@ pub fn point(cfg: &Config, hint: usize) -> Option<((i32, i32), isize)> {
             if ClientToScreen(window, &mut origin) == 0 {
                 return None;
             }
+            let point =
+                normalized_point((origin.x, origin.y), (r.right, r.bottom), (cfg.x, cfg.y))?;
             POINT {
-                x: origin.x + ((cfg.x * r.right as f64).round() as i32).clamp(0, r.right - 1),
-                y: origin.y + ((cfg.y * r.bottom as f64).round() as i32).clamp(0, r.bottom - 1),
+                x: point.0,
+                y: point.1,
             }
         } else {
             let mut p = POINT { x: 0, y: 0 };
@@ -67,5 +69,40 @@ pub fn point(cfg: &Config, hint: usize) -> Option<((i32, i32), isize)> {
         } else {
             Some(((p.x, p.y), monitor as isize))
         }
+    }
+}
+
+pub fn normalized_point(
+    origin: (i32, i32),
+    size: (i32, i32),
+    normalized: (f64, f64),
+) -> Option<(i32, i32)> {
+    if size.0 <= 0 || size.1 <= 0 || !normalized.0.is_finite() || !normalized.1.is_finite() {
+        return None;
+    }
+    Some((
+        origin.0
+            + ((normalized.0.clamp(0., 1.) * size.0 as f64).round() as i32).clamp(0, size.0 - 1),
+        origin.1
+            + ((normalized.1.clamp(0., 1.) * size.1 as f64).round() as i32).clamp(0, size.1 - 1),
+    ))
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn fixed_point_follows_physical_client_bounds_at_dpi_scales_and_after_window_moves() {
+        for percent in [100, 125, 150, 200] {
+            let size = (800 * percent / 100, 600 * percent / 100);
+            assert_eq!(
+                normalized_point((-1600, 40), size, (0.5, 0.25)),
+                Some((-1600 + size.0 / 2, 40 + (size.1 + 2) / 4))
+            );
+        }
+        assert_eq!(
+            normalized_point((200, 100), (1920, 1080), (1., 1.)),
+            Some((2119, 1179))
+        );
+        assert_eq!(normalized_point((0, 0), (0, 1080), (0.5, 0.5)), None);
     }
 }

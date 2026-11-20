@@ -1,3 +1,9 @@
+# Latest engine — 2026-11-20 native AHK-style scan
+
+Use the [active Rust source](rust/README.md) and [current verification notes](rust/AHK-ENGINE-2026-11-20.md). The active backend is now a25x25 default GDI capture plus early-exit Rust RGB scan. UI and animations are retained.19 noninteractive checks pass; live desktop clicks and Roblox remain unverified. Older engine descriptions below are historical.
+
+---
+
 # Latest revision — 2026-11-20
 
 The active [Rust application](rust/README.md) now uses fixed left-click output and a compact attached picker. Read the [current findings and verification limits](rust/CLICK-REPAIR-2026-11-20.md). The app and installer compile and ten headless checks pass; live Roblox and UI behaviour remain unverified. Older descriptions below are historical.
